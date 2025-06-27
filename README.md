@@ -2,4 +2,4 @@
 
 
 ## 伟大的作品！
-![alt text](IMG_7188.JPG)
+![alt text](image.JPG)
