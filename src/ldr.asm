@@ -30,12 +30,12 @@ SECTION loader
                     db "compatibility mode.", 0x0d, 0x0a, 0
 
 ; ------------------------------------------------------------
-; print_string
+; put_string_by_bios
 ; 功能: 在光标当前位置按指定颜色打印字符串
 ; 输入: bp = 字符串地址, cx = 长度, bl = 颜色属性
 ; 输出: 无(光标自动后移)
 ; ------------------------------------------------------------
-print_string:
+put_string_by_bios:
     pusha                               ; 保存全部通用寄存器
 
     mov ah, 0x03                        ; 获取光标位置
@@ -53,7 +53,7 @@ no_ia_32e:
     mov bp, arch1
     mov cx, brand_mag - arch1
     mov bl, 0x4f
-    call print_string
+    call put_string_by_bios
 
     cli
     hlt
@@ -63,7 +63,7 @@ start:
     mov bp, msg0
     mov cx, arch0 - msg0
     mov bl, 0x4f                        ; 红底亮白字
-    call print_string
+    call put_string_by_bios
 
     ; 检查处理器是否支持 ia-32e 模式
     mov eax, 0x80000000                 ; 返回处理器支持的最大扩展功能号
@@ -79,7 +79,7 @@ start:
     mov bp, arch0
     mov cx, arch1 - arch0
     mov bl, 0x07                        ; 黑底白字
-    call print_string
+    call put_string_by_bios
 
     ; 显示处理器商标信息
     mov eax, 0x80000000 
@@ -111,7 +111,7 @@ start:
     mov bp, brand_mag
     mov cx, cpu_addr - brand_mag
     mov bl, 0x07
-    call print_string
+    call put_string_by_bios
 
     ; 第五章再回来填坑----
 .no_brand:
@@ -187,13 +187,175 @@ start:
     mov bp, cpu_addr
     mov cx, protect - cpu_addr
     mov bl, 0x07   
-    call print_string
+    call put_string_by_bios
 
     ; 以下开始进入保护模式, 为 IA-32e 模式做必要的准备工作
     mov ax, GDT_PHY_ADDR >> 4               ; 计算 GDT 所在的逻辑段地址
     mov ds, ax 
 
+    ; 跳过 0# 号描述符的槽位, 处理器规定 0# 号描述符为空
     
+    ; 创建 1# 描述符，保护模式下的代码段描述符
+    mov dword [0x08], 0x0000ffff            ; 基地址为0，界限0xFFFFF，DPL=00, 4KB 粒度，代码段描述符，向上扩展
+    mov dword [0x0c], 0x00cf9800
+    
+    ; 创建 2# 描述符，保护模式下的数据段和堆栈段描述符
+    mov dword [0x10], 0x0000ffff            ; 基地址为0，界限0xFFFFF，DPL=00, 4KB 粒度，数据段描述符，向上扩展
+    mov dword [0x14], 0x00cf9200
+
+    ; 创建 3# 描述符，64 位模式下的代码段描述符。为进入 64 位提前作准备，其 L 位是 1
+    mov dword [0x18], 0x0000ffff            ; 基地址为0，界限0xFFFFF，DPL=00, 4KB 粒度，L=1，代码段描述符，向上扩展
+    mov dword [0x1c], 0x00af9800
+
+    ; 记录 GDT 的基地址和界限值
+    mov ax, SDA_PHY_ADDR >> 4               ; 切换到系统数据区
+    mov ds, ax  
+
+    mov word[2], 0x1f                       ; 描述符表的界限
+    mov dword[4], GDT_PHY_ADDR              ; GDT 的线性基地址
+
+    ; 加载描述符表寄存器 GDTR
+    lgdt [2]
+
+    in al, 0x92                             ; 南桥芯片内的端口
+    or al, 0000_0010B
+    out 0x92, al                            ; 打开处理器的第 21 根地址线 A20
+
+    cli                                     ; 关闭中断
+
+    mov eax, cr0                            ; 设置控制寄存器 CR0 的 PE 位，将处理器从实模式切换到保护模式。
+    or eax, 1
+    mov cr0, eax 
+
+    ; 以下进入保护模式
+    jmp 0x0008: dword LDR_PHY_ADDR + flush  ; 0x0008 是 16 位描述符选择子, 从 GDT 中选择第二个描述符。jmp 后清流水线并串行化处理器, 跳转到 flush
+
+    [bits 32]
+flush:
+    mov eax, 0x0010                         ; 加载数据段(4GB)选择子
+    mov ds, eax
+    mov es, eax
+    mov fs, eax
+    mov gs, eax
+    mov ss, eax  
+    mov esp, 0x7c00                         ; 堆栈指针
+
+    ; 显示信息, 在保护模式下位进入 IA-32e 模式做准备
+    mov ebx, LDR_PHY_ADDR + protect
+    call put_string_flat32
+
+; ------------------------------------------------------------
+; put_string_flat32
+; 功能: 显示 0 终止的字符串并移动光标。只运行在32位保护模式下，且使用平坦模型。
+; 输入: EBX=字符串的线性地址
+; ------------------------------------------------------------
+    push ebx 
+    push ecx 
+.getc:
+    mov cl, [ebx]
+    or cl, cl                               ; 检测串结束标志 0
+    jz .exit                                
+    call put_char
+    int ebx 
+    jmp .getc
+
+.exit:
+    pop ecx 
+    pop ebx 
+
+    ret 
+
+; ------------------------------------------------------------
+; put_char
+; 功能: 在当前光标处显示一个字符, 并推进光标, 仅用于段内调用
+; 输入: CL=字符ASCII码
+; ------------------------------------------------------------
+put_char:
+    pushad 
+
+    mov dx, 0x3d4                           ; 0x3d4 是 VGA 显卡的索引寄存器端口地址，用于指定要操作的显卡寄存器。
+    mov al, 0xe                             ; 0xe 是显卡的光标位置寄存器的索引值，用于读取光标的高字节位置。
+    out dx, al                              ; 将 0xe 输出到端口 0x3d4, 
+    inc dx                                  ; 0x3d5 是显卡的数据寄存器端口地址，用于读取或写入显卡寄存器的实际数据。
+    in al, dx                               ; 从端口 0x3d5 读取数据到 al, 读取了光标位置的高字节
+
+    mov ah, al                              ; 存入 ah 
+
+    dec dx                                  ; 同上, 再获取低字节
+    mov al, 0x0f                            ; 0x0f 是显卡的光标位置寄存器的索引值，用于读取光标的低字节位置。
+    out dx, al 
+    inc dx 
+    in al, dx 
+
+    mov bx, ax 
+    and edx, 0x0000ffff
+
+    cmp cl, 0x0d                            ; 回车符?
+    jnz .put_0a                             ; 不是回车符检查是不是换行符(0x0a)
+
+    mov ax, bx                              ; 处理回车符
+    mov bl, 80                              ; 行宽 80
+    div bl 
+    mul bl                                  ; 移到本行起始
+    mov bx, ax 
+    jmp .roll_screen
+
+.put_0a:
+    cmp cl, 0x0a                            ; 换行符?
+    jnz .put_other
+
+    add bx, 80                              ; 处理换行符
+    jmp .roll_screen
+
+.put_other:                                 ; 显示字符
+    shl bx, 1                               ; 在文本模式下，显存中每个字符占用 2 个字节, 左移 1 位相当于将 bx 的值乘以 2，从而将光标位置从字符索引转换为显存中的字节偏移量。
+    mov [0xb8000 + ebx], cl                 ; 0xb800:0000(0xb8000) 是显存的起始地址
+
+    shr bx, 1                               ; 将光标位置移到下一个字符
+    inc bx      
+
+.roll_screen:
+    cmp bx, 2000                            ; 超出屏幕外? 
+    jl .set_cursor                          ; 设置光标
+
+    ; 滚屏处理
+    push ebx                                ; 保存光标位置               
+
+    cld                                     ; 清除方向标志
+    mov esi, 0xb80a0                        ; 0xb80a0 是显存中第 2 行字符的起始地址。
+    mov edi, 0xb8000                        ; 0xb8000 是现存起始地址
+    mov ecx, 960                            ; 960 == 24 x 80 x 2 / 4, 滚屏操作需要将第 2 行到第 25 行的内容向上移动一行，覆盖第 1 行的内容。
+    rep movsd                               ; rep movsd 会根据 ecx 的值重复移动数据，直到 ecx 为 0。每次移动 4 个字节
+    
+    ; 清除屏幕最后一行
+    mov ebx, 3840                           ; 3840 == 24 x 80 x 2, 设置光标位置为屏幕最后一行的起始位置。
+    mov ecx, 80                             ; ecx 是循环次数
+
+.cls:
+    mov word[0xb8000 + ebx], 0x0720
+    add ebx, 2
+    loop .cls 
+
+    pop ebx                                 ; 恢复光标
+    sub ebx, 80                             ; 上移一行
+
+.set_cursor:                                ; 设置光标
+    mov dx, 0x3d4
+    mov al, 0x0e
+    out dx, al
+    inc dx 
+    mov al, bh 
+    out dx, al 
+
+    dec dx 
+    mov al, 0x0f
+    out dx, al 
+    inc dx 
+    mov al, bl 
+    out dx, al 
+
+    popad 
+    ret 
 
 SECTION trail
     ldr_end
