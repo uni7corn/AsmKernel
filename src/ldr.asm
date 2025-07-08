@@ -195,16 +195,16 @@ start:
 
     ; 跳过 0# 号描述符的槽位, 处理器规定 0# 号描述符为空
     
-    ; 创建 1# 描述符，保护模式下的代码段描述符
-    mov dword [0x08], 0x0000ffff            ; 基地址为0，界限0xFFFFF，DPL=00, 4KB 粒度，代码段描述符，向上扩展
+    ; 创建 1# 描述符, 保护模式下的代码段描述符
+    mov dword [0x08], 0x0000ffff            ; 基地址为0, 界限0xFFFFF, DPL=00, 4KB 粒度, 代码段描述符, 向上扩展
     mov dword [0x0c], 0x00cf9800
     
-    ; 创建 2# 描述符，保护模式下的数据段和堆栈段描述符
-    mov dword [0x10], 0x0000ffff            ; 基地址为0，界限0xFFFFF，DPL=00, 4KB 粒度，数据段描述符，向上扩展
+    ; 创建 2# 描述符, 保护模式下的数据段和堆栈段描述符
+    mov dword [0x10], 0x0000ffff            ; 基地址为0, 界限0xFFFFF, DPL=00, 4KB 粒度, 数据段描述符, 向上扩展
     mov dword [0x14], 0x00cf9200
 
-    ; 创建 3# 描述符，64 位模式下的代码段描述符。为进入 64 位提前作准备，其 L 位是 1
-    mov dword [0x18], 0x0000ffff            ; 基地址为0，界限0xFFFFF，DPL=00, 4KB 粒度，L=1，代码段描述符，向上扩展
+    ; 创建 3# 描述符, 64 位模式下的代码段描述符。为进入 64 位提前作准备, 其 L 位是 1
+    mov dword [0x18], 0x0000ffff            ; 基地址为0, 界限0xFFFFF, DPL=00, 4KB 粒度, L=1, 代码段描述符, 向上扩展
     mov dword [0x1c], 0x00af9800
 
     ; 记录 GDT 的基地址和界限值
@@ -223,7 +223,7 @@ start:
 
     cli                                     ; 关闭中断
 
-    mov eax, cr0                            ; 设置控制寄存器 CR0 的 PE 位，将处理器从实模式切换到保护模式。
+    mov eax, cr0                            ; 设置控制寄存器 CR0 的 PE 位, 将处理器从实模式切换到保护模式。
     or eax, 1
     mov cr0, eax 
 
@@ -244,11 +244,51 @@ flush:
     mov ebx, LDR_PHY_ADDR + protect
     call put_string_flat32
 
+    ; 以下加载系统核心程序
+    mov edi, CORE_PHY_ADDR
+
+    mov eax, COR_START_SECTOR
+    mov ebx, edi                            ; 起始地址
+    call read_hard_disk_0                   ; 读取程序起始第一扇区
+
+    ; 判断程序大小
+    mov eax, [edi]                          ; 内核程序大小
+    xor edx, edx 
+    mov ecx, 512                            ; 每个扇区大小为 512
+    div ecx                                 ; 商存储在 eax 中, 余数存储在 edx 中
+
+    ; 处理长度 < 512 字节的情况
+    or eax, eax 
+    jz pge
+    ; 处理长度 >= 512 字节的情况
+    or edx, edx 
+    jnz @1
+    dec eax 
+    or eax, eax                             ; 正好为 512 时, 单独处理
+    jz pge
+@1:
+    ; 读取剩余扇区
+    mov ecx, eax                            ; 循环次数
+    mov eax, COR_START_SECTOR
+    inc eax 
+@2:
+    call read_hard_disk_0
+    inc eax
+    loop @2
+
+pge:
+    ; 回填内核加载地址的物理地址到内核程序头部, 手工回填有什么意义吗?
+    mov dword [CORE_PHY_ADDR + 0x08], CORE_PHY_ADDR
+    mov dword [CORE_PHY_ADDR + 0x0c], 0
+
+    ; 创建 4 级分页系统, 只包含基本部分, 覆盖低端 1 MB物理内存
+
 ; ------------------------------------------------------------
 ; put_string_flat32
-; 功能: 显示 0 终止的字符串并移动光标。只运行在32位保护模式下，且使用平坦模型。
+; 功能: 显示 0 终止的字符串并移动光标。只运行在32位保护模式下, 且使用平坦模型。
 ; 输入: EBX=字符串的线性地址
 ; ------------------------------------------------------------
+put_string_flat32:
     push ebx 
     push ecx 
 .getc:
@@ -273,16 +313,16 @@ flush:
 put_char:
     pushad 
 
-    mov dx, 0x3d4                           ; 0x3d4 是 VGA 显卡的索引寄存器端口地址，用于指定要操作的显卡寄存器。
-    mov al, 0xe                             ; 0xe 是显卡的光标位置寄存器的索引值，用于读取光标的高字节位置。
+    mov dx, 0x3d4                           ; 0x3d4 是 VGA 显卡的索引寄存器端口地址, 用于指定要操作的显卡寄存器。
+    mov al, 0xe                             ; 0xe 是显卡的光标位置寄存器的索引值, 用于读取光标的高字节位置。
     out dx, al                              ; 将 0xe 输出到端口 0x3d4, 
-    inc dx                                  ; 0x3d5 是显卡的数据寄存器端口地址，用于读取或写入显卡寄存器的实际数据。
+    inc dx                                  ; 0x3d5 是显卡的数据寄存器端口地址, 用于读取或写入显卡寄存器的实际数据。
     in al, dx                               ; 从端口 0x3d5 读取数据到 al, 读取了光标位置的高字节
 
     mov ah, al                              ; 存入 ah 
 
     dec dx                                  ; 同上, 再获取低字节
-    mov al, 0x0f                            ; 0x0f 是显卡的光标位置寄存器的索引值，用于读取光标的低字节位置。
+    mov al, 0x0f                            ; 0x0f 是显卡的光标位置寄存器的索引值, 用于读取光标的低字节位置。
     out dx, al 
     inc dx 
     in al, dx 
@@ -308,7 +348,7 @@ put_char:
     jmp .roll_screen
 
 .put_other:                                 ; 显示字符
-    shl bx, 1                               ; 在文本模式下，显存中每个字符占用 2 个字节, 左移 1 位相当于将 bx 的值乘以 2，从而将光标位置从字符索引转换为显存中的字节偏移量。
+    shl bx, 1                               ; 在文本模式下, 显存中每个字符占用 2 个字节, 左移 1 位相当于将 bx 的值乘以 2, 从而将光标位置从字符索引转换为显存中的字节偏移量。
     mov [0xb8000 + ebx], cl                 ; 0xb800:0000(0xb8000) 是显存的起始地址
 
     shr bx, 1                               ; 将光标位置移到下一个字符
@@ -324,15 +364,15 @@ put_char:
     cld                                     ; 清除方向标志
     mov esi, 0xb80a0                        ; 0xb80a0 是显存中第 2 行字符的起始地址。
     mov edi, 0xb8000                        ; 0xb8000 是现存起始地址
-    mov ecx, 960                            ; 960 == 24 x 80 x 2 / 4, 滚屏操作需要将第 2 行到第 25 行的内容向上移动一行，覆盖第 1 行的内容。
-    rep movsd                               ; rep movsd 会根据 ecx 的值重复移动数据，直到 ecx 为 0。每次移动 4 个字节
+    mov ecx, 960                            ; 960 == 24 x 80 x 2 / 4, 滚屏操作需要将第 2 行到第 25 行的内容向上移动一行, 覆盖第 1 行的内容。
+    rep movsd                               ; rep movsd 会根据 ecx 的值重复移动数据, 直到 ecx 为 0。每次移动 4 个字节
     
     ; 清除屏幕最后一行
     mov ebx, 3840                           ; 3840 == 24 x 80 x 2, 设置光标位置为屏幕最后一行的起始位置。
     mov ecx, 80                             ; ecx 是循环次数
 
 .cls:
-    mov word[0xb8000 + ebx], 0x0720
+    mov word[0xb8000 + ebx], 0x0720         ; 0x0720 是空格字符, 黑色背景
     add ebx, 2
     loop .cls 
 
@@ -355,6 +395,65 @@ put_char:
     out dx, al 
 
     popad 
+    ret 
+
+; ------------------------------------------------------------
+; read_hard_disk_0
+; 功能: 从硬盘中读取一个扇区
+; 输入: eax=逻辑扇区号, ebx=目标缓冲区地址
+; 返回: ebx = ebx + 512
+; ------------------------------------------------------------
+read_hard_disk_0:
+    push eax
+    push ecx
+    push edx 
+
+    push eax 
+
+    mov dx, 0x1f2                           ; 0x1f2 是硬盘控制器的一个端口地址, 用于指定要读取的扇区数量。
+    mov al, 1
+    out dx, al                              ; 将 1 写入到硬盘控制器的端口 0x1f2, 告诉硬盘控制器接下来要读取一个扇区。
+
+    inc dx                                  ; 0x1f3
+    pop eax 
+    out dx, al                              ; LBA 地址 7 ~ 0
+
+    inc dx                                  ; 0x1f4
+    mov cl, 8
+    shr eax, cl 
+    out dx, al                              ; LBA 地址 15 ~ 8
+
+    inc dx                                  ; 0x1f5
+    shr eax, cl 
+    out dx, al                              ; LBA 地址 23 ~ 16
+
+    inc dx                                  ; 0x1f6
+    shr eax, cl 
+    or al, 0xe0                             ; 第一硬盘
+    out dx, al                              ; LBA 地址 27 ~ 24
+
+    inc dx                                  ; 0x1f7
+    mov al, 0x20    
+    out dx, al                              ; 读命令
+
+.waits:
+    in al, dx 
+    test al, 8
+    jz .waits                               ; 忙或数据还没准备好, 循环查询
+
+    mov ecx, 256                            ; 总共要读取的字数, 循环次数
+    mov dx, 0x1f0
+
+.readw:
+    in ax, dx                               ; 循环去读硬盘数据写入指定内存
+    mov [ebx], ax 
+    add ebx, 2
+    loop .readw
+
+    pop edx 
+    pop ecx 
+    pop eax 
+
     ret 
 
 SECTION trail

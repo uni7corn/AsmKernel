@@ -49,6 +49,8 @@ SECTION mbr vstart=0x00007c00
     or edx, edx                             ; 判读 edx 是否为 0, 不为零, 说面 eax 是少一的, 因为最开始已经读了一个扇区, 正好弥补这里
     jnz @1                                
     dec eax                                 ; edx 为 0, 即没有余数, 反而要将 eax 中的总扇区数减一
+    or eax, eax                             ; 正好等于 512 时, 单独处理
+    jz go_ldr
 @1:
     ; 读取剩余扇区
     pop ds                                  
