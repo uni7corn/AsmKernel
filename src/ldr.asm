@@ -282,6 +282,53 @@ pge:
     mov dword [CORE_PHY_ADDR + 0x0c], 0
 
     ; 创建 4 级分页系统, 只包含基本部分, 覆盖低端 1 MB物理内存
+    mov ebx, PML4_PHY_ADDR                  ; 找个地方存四级页表
+
+    ; 4 级页表清零
+    mov ecx, 1024
+    xor esi, esi 
+.cls0:
+    mov dword [ebx + esi], 0
+    add esi, 4
+    loop .cls0
+
+    ; 在 4 级页表内最后一项存放自身地址, 这样可以直接访问最后一项的虚拟地址来获取页表的真实地址
+    mov dword [ebx + 511 * 8], PML4_PHY_ADDR | 3    ; 添加属性
+    mov dword [ebx + 511 * 8 + 4], 0
+
+    ; 映射虚拟地址与物理地址的低端 2 MB, 确保开启分页后也可以正常访问, 即地址经过页表转换后不变
+    mov dword [ebx + 0 * 8], PDPT_PHY_ADDR  | 3     ; 添加属性
+    mov dword [ebx + 0 * 8 + 4], 0
+
+    ; 将页目录指针表中的内容清 0
+    mov PDPT_PHY_ADDR
+
+    mov ecx, 1024
+    xor esi, esi 
+.cls1:
+    mov dword [ebx + esi], 0
+    add esi, 4
+    loop .cls1
+
+    ; 套娃, 创建下一级页表
+    mov dword [ebx + 0 * 8], PDT_PHY_ADDR | 3
+    mov dword [ebx + 0 * 8 + 4], 0
+
+    ; 清 0
+    mov ebx PDT_PHY_ADDR
+
+    mov ecx, 1024
+    xor esi, esi
+.cls2:
+    mov dword [ebx + esi], 0
+    add esi, 4
+    loop .cls2
+
+    ; 在页目录表内创建与低端 2MB 对应的表项
+    mov dword [ebx + 0 * 8], 0 | 0x83       ; 位 7、R/W 位、P 位是 1, 其他全是 0
+    mov dword [ebx + 0 * 8 + 4], 0
+
+    ; 将物理内存的低端 2MB 映射到线性地址空间的高端
 
 ; ------------------------------------------------------------
 ; put_string_flat32
