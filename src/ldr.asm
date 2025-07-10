@@ -292,11 +292,12 @@ pge:
     add esi, 4
     loop .cls0
 
-    ; 在 4 级页表内最后一项存放自身地址, 这样可以直接访问最后一项的虚拟地址来获取页表的真实地址
+    ; 在 4 级页表内最后一项存放自身地址, 这样可以通过虚拟地址访问表中最后一项来获取页表的真实地址
     mov dword [ebx + 511 * 8], PML4_PHY_ADDR | 3    ; 添加属性
     mov dword [ebx + 511 * 8 + 4], 0
 
-    ; 映射虚拟地址与物理地址的低端 2 MB, 确保开启分页后也可以正常访问, 即地址经过页表转换后不变
+    ; 映射虚拟地址与物理地址的低端 2 MB, 确保开启分页后也可以正常访问, 即地址经过页表转换后不变。
+    ; 0x0000000000000000--0x00000000001FFFFF 低 48 位按 9 9 9 9 12 分割进行四级分页查表。而高 16 位无效, 填充符号位
     mov dword [ebx + 0 * 8], PDPT_PHY_ADDR  | 3     ; 添加属性
     mov dword [ebx + 0 * 8 + 4], 0
 
@@ -328,7 +329,63 @@ pge:
     mov dword [ebx + 0 * 8], 0 | 0x83       ; 位 7、R/W 位、P 位是 1, 其他全是 0
     mov dword [ebx + 0 * 8 + 4], 0
 
-    ; 将物理内存的低端 2MB 映射到线性地址空间的高端
+    ; 将物理内存的低端 2MB 映射到线性地址空间的高端, 内核处于高地址, 要做一次重复映射。0xFFFF800000000000--0xFFFF8000001FFFFF
+    mov ebx, PML4_PHY_ADDR
+
+    mov dword [ebx + 256 * 8], PDPT_PHY_ADDR | 3 ; 页目录表
+    mov dword [ebx + 256 * 8 + 4], 0
+
+    ; 因为要为每个进程都给予一个独立的 4 级头表(可以理解为指针数组), 而内核空间是所有进程共享的, 要在每个进程独立
+    ; 的 4 级头表中内核公共部分填入一样的数据。页表机制的一个特点是 就是动态分配, 用时间换空间, 为了避免此特性使
+    ; 每个进程不停的去同步 4 级头表中内核公共部分, 索性直接将 4 级头表中内核公共部分全部预分配好。详细解释见书中 135 页。
+    mov eax, 257
+    mov edx, COR_PDPT_ADDR | 3
+.fill_pml4:
+    mov dword [ebx + eax * 8], edx 
+    mov dword [ebx + eax * 8 + 4], 0
+    add edx, 0x1000
+    inc eax 
+    cmp eax, 511
+    jb .fill_pml4
+
+    ; 将预分配的页目录指针表全部清零
+    mov eax, COR_PDPT_ADDR
+.zero_pdpt:
+    mov dword [eax], 0
+    add eax, 4
+    cmp eax, COR_PDPT_ADDR + 0x1000 * 254
+    jb .zero_pdpt
+
+    ; 将 cr3 寄存器指向 4 级头表
+    mov eax, PML4_PHY_ADDR
+    mov cr3, eax 
+
+    ; 开启物理扩展 PAE
+    mov eax, cr4 
+    bts eax, 5                              ; 位测试并置位
+    mov cr4, eax 
+
+    ; 设置型号专属寄存器 IA32_EFER.LME, 允许 IA_32e 模式
+    mov ecx, 0x0c0000080                    ; 指定型号专属寄存器 IA32_EFER
+    rdmsr
+    bts eax, 8                              ; 设置 LME 位
+    wrmsr 
+
+    ; 开启分页功能
+    mov eax, cr0 
+    bts eax, 31                             ; 置位 cr0.PG
+    mov cr0, eax 
+
+    ; 打印 IA_32e 激活信息
+    mov ebx, ia_32e + LDR_PHY_ADDR
+    call put_string_flat32
+
+    ; 通过原返回的方式进入 64 位模式内核
+    push word CORE_CODE64_SEL
+    mov eax, dword [CORE_PHY_ADDR + 4]
+    add eax, CORE_PHY_ADDR
+    push eax 
+    retf                                    ; 压入 GDT 选择子和地址
 
 ; ------------------------------------------------------------
 ; put_string_flat32
