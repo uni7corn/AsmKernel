@@ -277,7 +277,7 @@ flush:
     loop @2
 
 pge:
-    ; 回填内核加载地址的物理地址到内核程序头部, 手工回填有什么意义吗?
+    ; 回填内核加载地址的物理地址到内核程序头部
     mov dword [CORE_PHY_ADDR + 0x08], CORE_PHY_ADDR
     mov dword [CORE_PHY_ADDR + 0x0c], 0
 

@@ -21,7 +21,7 @@
     ; 虚拟内存空间的高端起始于线性地址 0xffff800000000000
     UPPER_LINEAR_START  equ     0xffff800000000000  
     UPPER_CORE_LINEAR   equ     UPPER_LINEAR_START + CORE_PHY_ADDR	    ; 内核的高端线性地址
-    UPPER_TEXT_VIDEO    equ     UPPER_LINEAR_START + 0x000b8000	        ; 文本显示缓冲区的高端起始线性地址
+    UPPER_TEXT_VIDEO    equ     UPPER_LINEAR_START + 0x000b8000	            ; 文本显示缓冲区的高端起始线性地址
     UPPER_SDA_LINEAR    equ     UPPER_LINEAR_START + SDA_PHY_ADDR	    ; 系统数据区的高端线性地址
     UPPER_GDT_LINEAR    equ     UPPER_LINEAR_START + GDT_PHY_ADDR	    ; GDT 的高端线性地址
     UPPER_IDT_LINEAR    equ     UPPER_LINEAR_START + IDT_PHY_ADDR	    ; IDT 的高端线性地址
