@@ -32,6 +32,17 @@ general_exception_handler:                          ; 通用异常处理
 
 exceptm         db "A exception raised,halt.", 0    ; 发生异常时的错误信息
 
+general_8259ints_handler:                           ; 通用的 8259 中断处理过程
+    push rax 
+
+    mov al, 0x20                                    ; 中断结束命令 EOI
+    out 0xa0, al                                    ; 向从片发送
+    out 0x20, al                                    ; 向主片发送
+
+    pop rax 
+
+    iretq
+
 init: 
     ; 初始化内核工作环境
 
@@ -60,9 +71,55 @@ init:
     ; 为 32 个异常创建通用处理过程的中断门
     mov r9, [rel position]
     lea rax, [r9 + general_exception_handler]
-    call make_interrupt_gate                        ; 
+    call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
 
-.to_upper:
+    xor r8, r8  
+.idt0:                                              ; 32 个异常
+    call mount_idt_entry                            ; 在 core_utils64.asm 中实现
+    inc r8 
+    cmp r8, 31 
+    jle .idt0
 
+    ; 创建并安装中断门
+    lea rax, [r9 + general_interrupt_handler]       
+    call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
+
+    mov r8, 32 
+.idt1:
+    call mount_idt_entry                            ; 在 core_utils64.asm 中实现
+    inc r8 
+    cmp r8, 255
+    jle .idt1
+
+    mov rax, UPPER_IDT_LINEAR                       ; 中断描述符表 IDT 的高端线性地址
+    mov rbx, UPPER_SDA_LINEAR                       ; 系统数据区 SDA 的高端线性地址
+    mov word [rbx + 0x0c], 256 * 16 - 1
+    mov qword [rbx + 0x0e], rax                     ; 将 IDT 的线性地址和界限写入内核空间保存
+    
+
+    lidt [rbx + 0x0c]                               ; 加载 IDT
+
+    call init_8259                                  ; 初始化 8259 中断控制器，包括重新设置中断向量号
+
+    lea rax, [r9 + general_8259ints_handler]        ; 得到通用 8259 中断处理过程的线性地址
+    call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
+
+    mov r8, 0x20
+.8259:
+    call mount_idt_entry                            ; 在 core_utils64.asm 中实现
+    inc r8
+    cmp r8, 0x2f                                    ; 8259 用来收集外部硬件中断信号, 提供 16 个中断向量, 将之前的覆盖
+    jle .8259
+
+    sti                                             ; 开放硬件中断
+
+    ; 在 64 位模式下显示的第一条信息!
+    mov r15, [rel, position]
+    lea rbx, [r15 + welcome]
+    call put_string64                               ; 在 core_utils64.asm 中实现
+
+.halt:
+    hlt 
+    jmp .halt
 
 core_end:

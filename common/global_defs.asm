@@ -21,7 +21,7 @@
     ; 虚拟内存空间的高端起始于线性地址 0xffff800000000000
     UPPER_LINEAR_START  equ     0xffff800000000000  
     UPPER_CORE_LINEAR   equ     UPPER_LINEAR_START + CORE_PHY_ADDR	    ; 内核的高端线性地址
-    UPPER_TEXT_VIDEO    equ     UPPER_LINEAR_START + 0x000b8000	            ; 文本显示缓冲区的高端起始线性地址
+    UPPER_TEXT_VIDEO    equ     UPPER_LINEAR_START + 0x000b8000	        ; 文本显示缓冲区的高端起始线性地址
     UPPER_SDA_LINEAR    equ     UPPER_LINEAR_START + SDA_PHY_ADDR	    ; 系统数据区的高端线性地址
     UPPER_GDT_LINEAR    equ     UPPER_LINEAR_START + GDT_PHY_ADDR	    ; GDT 的高端线性地址
     UPPER_IDT_LINEAR    equ     UPPER_LINEAR_START + IDT_PHY_ADDR	    ; IDT 的高端线性地址
@@ -47,15 +47,15 @@
     ; 多处理器环境下的自旋锁加锁宏。需要两个参数: 寄存器, 以及一个对应宽度的锁变量
     %macro  SET_SPIN_LOCK 2             ; 两个参数, 分别是寄存器 %1 和锁变量 %2
             %%spin_lock:
-                    cmp %2, 0           ; 锁是释放状态吗？
-                    je %%get_lock      	; 获取锁
-                    pause
-                    jmp %%spin_lock    	; 继续尝试获取锁
+                    cmp %2, 0           ; 看一眼锁现在是不是 0
+                    je %%get_lock      	; 如果是 0，说明没人占，跳过去抢
+                    pause				; 不是 0，先喘口气（降低 CPU 占用）
+                    jmp %%spin_lock    	; 继续看
             %%get_lock:
                     mov %1, 1
-                    xchg %1, %2
-                    cmp %1, 0          	; 交换前为零？
-                    jne %%spin_lock   	; 已有程序抢先加锁, 失败重来
+                    xchg %1, %2         ; 用 xchg 的“原子交换”能力抢锁，抢不到就一直循环（自旋）
+                    cmp %1, 0          	; 交换回来的 %2 旧值是 0 吗？
+                    jne %%spin_lock   	; 不是 0 说明别人先插了旗，回到开头重抢
     %endmacro
 
 %endif
