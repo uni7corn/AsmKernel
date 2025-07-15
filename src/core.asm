@@ -114,7 +114,7 @@ init:
     sti                                             ; 开放硬件中断
 
     ; 在 64 位模式下显示的第一条信息!
-    mov r15, [rel, position]
+    mov r15, [rel position]
     lea rbx, [r15 + welcome]
     call put_string64                               ; 在 core_utils64.asm 中实现
 

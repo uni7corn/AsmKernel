@@ -302,7 +302,7 @@ pge:
     mov dword [ebx + 0 * 8 + 4], 0
 
     ; 将页目录指针表中的内容清 0
-    mov PDPT_PHY_ADDR
+    mov ebx, PDPT_PHY_ADDR
 
     mov ecx, 1024
     xor esi, esi 
@@ -316,7 +316,7 @@ pge:
     mov dword [ebx + 0 * 8 + 4], 0
 
     ; 清 0
-    mov ebx PDT_PHY_ADDR
+    mov ebx, PDT_PHY_ADDR
 
     mov ecx, 1024
     xor esi, esi
@@ -400,7 +400,7 @@ put_string_flat32:
     or cl, cl                               ; 检测串结束标志 0
     jz .exit                                
     call put_char
-    int ebx 
+    inc ebx 
     jmp .getc
 
 .exit:
@@ -561,4 +561,4 @@ read_hard_disk_0:
     ret 
 
 SECTION trail
-    ldr_end
+    ldr_end:

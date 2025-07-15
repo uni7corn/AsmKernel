@@ -60,7 +60,7 @@ SECTION mbr vstart=0x00007c00
     inc dword [si + 8]                      ; 起始逻辑扇区号加一
     mov ah, 0x42                            ; 读取
     mov dl, 0x80
-    inc 0x13
+    int 0x13
 
     mov bp, msg0
     mov di, msg1 - msg0
