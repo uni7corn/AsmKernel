@@ -431,7 +431,7 @@ put_char:
     inc dx 
     in al, dx 
 
-    mov bx, ax 
+    mov bx, ax                              ; 此时 bx 中存储了字符的数目, 一个字符占两个字节
     and edx, 0x0000ffff
 
     cmp cl, 0x0d                            ; 回车符?
@@ -466,8 +466,8 @@ put_char:
     push ebx                                ; 保存光标位置               
 
     cld                                     ; 清除方向标志
-    mov esi, 0xb80a0                        ; 0xb80a0 是显存中第 2 行字符的起始地址。
-    mov edi, 0xb8000                        ; 0xb8000 是现存起始地址
+    mov esi, 0xb80a0                        ; 0xb80a0 是显存中第 2 行字符的起始地址。源地址
+    mov edi, 0xb8000                        ; 0xb8000 是显存起始地址。目标地址
     mov ecx, 960                            ; 960 == 24 x 80 x 2 / 4, 滚屏操作需要将第 2 行到第 25 行的内容向上移动一行, 覆盖第 1 行的内容。
     rep movsd                               ; rep movsd 会根据 ecx 的值重复移动数据, 直到 ecx 为 0。每次移动 4 个字节
     
