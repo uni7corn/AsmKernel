@@ -1,6 +1,6 @@
 ; 内核加载器
 
-%include "../common/global_defs.asm"
+%include "./common/global_defs.asm"
 
 SECTION loader
     marker          dd "lino"           ; 内核加载器有效标志    +00 将老师的 lizh, 改为了 lino, hh

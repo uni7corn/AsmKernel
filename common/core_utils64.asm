@@ -2,7 +2,7 @@
 
 ; 在多处理器环境中使用时, 需要在内核程序中定义宏 __MP__
 
-%include "../common/global_defs.asm"
+%include "./common/global_defs.asm"
 
 	bits 64
 

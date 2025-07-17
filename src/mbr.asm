@@ -1,6 +1,6 @@
 ; 主引导扇区程序
 
-%include "../common/global_defs.asm"
+%include "./common/global_defs.asm"
 
 SECTION mbr vstart=0x00007c00
     xor ax, ax

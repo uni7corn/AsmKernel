@@ -1,6 +1,6 @@
 ; 内核
 
-%include "../common/global_defs.asm"
+%include "./common/global_defs.asm"
 
 SECTION core_header                                 ; 内核头部
     length      dd core_end                         ; 内核总长度
@@ -12,7 +12,7 @@ SECTION core_data                                   ; 内核数据段
 
 SECTION core_code                                   ; 内核代码段
 
-%include "../common/core_utils64.asm"
+%include "./common/core_utils64.asm"
 
     bits 64
 
