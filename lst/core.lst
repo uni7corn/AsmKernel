@@ -64,8 +64,13 @@
     61                              <1> %endif
      4                                  
      5                                  SECTION core_header                                 ; 内核头部
+<<<<<<< HEAD
      6 00000000 [B2020000]                  length      dd core_end                         ; 内核总长度
      7 00000004 [C7010000]                  init_entry  dd init                             ; 内核入口点
+=======
+     6 00000000 [B3020000]                  length      dd core_end                         ; 内核总长度
+     7 00000004 [C8010000]                  init_entry  dd init                             ; 内核入口点
+>>>>>>> 83ea3db (fix: 第三章终于跑通! 还是在 windows, 虚拟机上没法用 virtual-box)
      8 00000008 0000000000000000            position    dq 0                                ; 内核加载虚拟地址
      9                                  
     10                                  SECTION core_data                                   ; 内核数据段
@@ -146,6 +151,7 @@
      6                              <1> 
      7                              <1> 	bits 64
      8                              <1> 
+<<<<<<< HEAD
      9                              <1> 
     10                              <1> ; ------------------------------------------------------------
     11                              <1> ; put_cstringxy64
@@ -308,12 +314,177 @@
    166 000000BE 59                  <1> 	pop rcx 
    167 000000BF 5B                  <1> 	pop rbx 
    168                              <1> 
+=======
+     9                              <1> ; ------------------------------------------------------------
+    10                              <1> ; put_cstringxy64
+    11                              <1> ; 功能: 在指定位置用指定颜色显示 0 终止的字符串，只适用于打印图形字符。由于各程序打印时的坐标位置不同，互不干扰，不需要加锁和互斥。
+    12                              <1> ; 输入: rbx=字符串首地址, dh=行, dl=列, r9b=颜色属性
+    13                              <1> ; ------------------------------------------------------------
+    14                              <1> %ifdef __MP__ 
+    15                              <1> _prnxy_locker dp 0
+    16                              <1> %endif 
+    17                              <1> 
+    18                              <1> put_cstringxy64:
+    19 00000000 50                  <1> 	push rax 
+    20 00000001 53                  <1> 	push rbx 
+    21 00000002 51                  <1> 	push rcx 
+    22 00000003 4150                <1> 	push r8 
+    23                              <1> 
+    24                              <1> 	; 指定坐标位置在显存内的偏移量
+    25 00000005 88F0                <1> 	mov al, dh 
+    26 00000007 B5A0                <1> 	mov ch, 160									; 每行 80 个字符, 占用 160 字节
+    27 00000009 F6E5                <1> 	mul ch 
+    28 0000000B D0E2                <1> 	shl dl, 1									; 每个字符占两字节
+    29 0000000D 6681E2FF00          <1> 	and dx, 0x00ff
+    30 00000012 6601D0              <1> 	add ax, dx 									; 得到相应显存偏移
+    31 00000015 4825FFFF0000        <1> 	and rax, 0x000000000000ffff
+    32                              <1> 
+    33 0000001B 9C                  <1> 	pushfq										; 将 RFLAGS 寄存器的全部 64 位标志位压入当前栈顶
+    34 0000001C FA                  <1> 	cli 
+    35                              <1> 
+    36                              <1> %ifdef __MP__									; 读写显存时加锁
+    37                              <1> 	SET_SPIN_LOCK r8, qword [rel _prnxy_locker]
+    38                              <1> %endif 
+    39                              <1> 
+    40 0000001D 49B800800B000080FF- <1> 	mov r8, UPPER_TEXT_VIDEO					; 显存起始线性地址
+    40 00000026 FF                  <1>
+    41                              <1> .nextc:
+    42 00000027 8A13                <1> 	mov dl, [rbx]								; 获取将要显示的字符
+    43 00000029 08D2                <1> 	or dl, dl 
+    44 0000002B 7412                <1> 	jz .exit 
+    45 0000002D 41881400            <1> 	mov byte [r8 + rax], dl 					; 字符内容
+    46 00000031 45884C0001          <1> 	mov byte [r8 + rax + 1], r9b 				; 字符颜色
+    47 00000036 48FFC3              <1> 	inc rbx 
+    48 00000039 4883C002            <1> 	add rax, 2
+    49 0000003D EBE8                <1> 	jmp .nextc
+    50                              <1> .exit:
+    51 0000003F 4D31C0              <1> 	xor r8, r8 
+    52                              <1> 
+    53                              <1> %ifdef __MP__									; 读写显存时释放锁
+    54                              <1> 	mov qword [rel _prnxy_locker], 0
+    55                              <1> %endif 
+    56                              <1> 
+    57 00000042 9D                  <1> 	popfq 
+    58                              <1> 
+    59 00000043 4158                <1> 	pop r8 
+    60 00000045 5A                  <1> 	pop rdx 
+    61 00000046 59                  <1> 	pop rcx 
+    62 00000047 5B                  <1> 	pop rbx 
+    63 00000048 58                  <1> 	pop rax 
+    64                              <1> 
+    65 00000049 C3                  <1> 	ret 
+    66                              <1> 
+    67                              <1> ; ------------------------------------------------------------
+    68                              <1> ; make_interrupt_gate
+    69                              <1> ; 功能: 创建 64 位的中断门
+    70                              <1> ; 输入: rax=处理程序的线性地址
+    71                              <1> ; 输出: rdi 与 rsi 组成中断门(中断门、陷阱门格式见书中 148 页)
+    72                              <1> ; ------------------------------------------------------------
+    73                              <1> make_interrupt_gate:
+    74 0000004A 4889C7              <1> 	mov rdi, rax 
+    75 0000004D 48C1EF20            <1> 	shr rdi, 32 						; 门的高 64 位, 其中高 32 位是保留
+    76                              <1> 
+    77 00000051 50                  <1> 	push rax 							; 借助栈构造, 先压入完整 rax, 也就是门的低 64 位, 在对其修改
+    78 00000052 66C74424021800      <1> 	mov word [rsp + 2], CORE_CODE64_SEL	; 填入选择子
+    79 00000059 89442404            <1> 	mov [rsp + 4], eax 					; 填入线性地址 31~16 位
+    80 0000005D 66C7442404008E      <1> 	mov word [rsp + 4], 0x8e00			; 填入属性, P=1, TYPE=64 的中断门, 覆盖填入
+    81 00000064 5E                  <1> 	pop rsi 
+    82                              <1> 
+    83 00000065 C3                  <1> 	ret 								; 可以参考书中 155 页的图
+    84                              <1> 
+    85                              <1> ; ------------------------------------------------------------
+    86                              <1> ; mount_idt_entry
+    87                              <1> ; 功能: 在中断描述符表 IDT 中安装门描述符
+    88                              <1> ; 输入: r8=中断向量, rdi 与 rsi 组成中断门
+    89                              <1> ; ------------------------------------------------------------
+    90                              <1> mount_idt_entry:
+    91 00000066 4150                <1> 	push r8
+    92 00000068 4151                <1> 	push r9 
+    93                              <1> 
+    94 0000006A 49C1E004            <1> 	shl r8, 4 							; 中断号乘以 16 得到表内偏移, 每个中断门 16 字节大小
+    95 0000006E 49B900E000000080FF- <1> 	mov r9, UPPER_IDT_LINEAR			; 中断描述符表的高端地址
+    95 00000077 FF                  <1>
+    96 00000078 4B893401            <1> 	mov [r9 + r8], rsi 
+    97 0000007C 4B897C0108          <1> 	mov [r9 + r8 + 8], rdi 
+    98                              <1> 
+    99 00000081 4159                <1> 	pop r9 
+   100 00000083 4158                <1> 	pop r8 
+   101                              <1> 
+   102 00000085 C3                  <1> 	ret  
+   103                              <1> 
+   104                              <1> ; ------------------------------------------------------------
+   105                              <1> ; init_8259
+   106                              <1> ; 功能: 初始化8259中断控制器，包括重新设置向量号
+   107                              <1> ; ------------------------------------------------------------
+   108                              <1> init_8259:
+   109 00000086 50                  <1> 	push rax
+   110                              <1> 
+   111 00000087 B011                <1> 	mov al, 0x11
+   112 00000089 E620                <1> 	out 0x20, al                    	; ICW1: 边沿触发/级联方式
+   113 0000008B B020                <1> 	mov al, 0x20
+   114 0000008D E621                <1> 	out 0x21, al  						; ICW2: 起始中断向量（避开前31个异常的向量）
+   115 0000008F B004                <1> 	mov al, 0x04
+   116 00000091 E621                <1> 	out 0x21, al  						; ICW3: 从片级联到 IR2
+   117 00000093 B001                <1> 	mov al, 0x01
+   118 00000095 E621                <1> 	out 0x21, al                  		; ICW4: 非总线缓冲，全嵌套，正常 EOI
+   119                              <1> 
+   120 00000097 B011                <1> 	mov al, 0x11
+   121 00000099 E6A0                <1> 	out 0xa0, al                  		; ICW1: 边沿触发/级联方式
+   122 0000009B B028                <1> 	mov al, 0x28
+   123 0000009D E6A1                <1> 	out 0xa1, al                  		; ICW2: 起始中断向量-->0x28
+   124 0000009F B002                <1> 	mov al, 0x02
+   125 000000A1 E6A1                <1> 	out 0xa1, al                  		; ICW3: 从片识别标志，级联到主片 IR2
+   126 000000A3 B001                <1> 	mov al, 0x01
+   127 000000A5 E6A1                <1> 	out 0xa1, al                  		; ICW4: 非总线缓冲，全嵌套，正常 EOI
+   128                              <1> 
+   129 000000A7 58                  <1> 	pop rax
+   130 000000A8 C3                  <1> 	ret
+   131                              <1> 
+   132                              <1> ; ------------------------------------------------------------
+   133                              <1> ; put_string64
+   134                              <1> ; 功能: 显示 0 终止的字符串并移动光标
+   135                              <1> ; 输入: rbx=字符串的线性地址
+   136                              <1> ; ------------------------------------------------------------
+   137                              <1> %ifdef __MP__
+   138                              <1> _prn_str_locker dq 0
+   139                              <1> %endif
+   140                              <1> 
+   141                              <1> put_string64:
+   142 000000A9 53                  <1> 	push rbx 
+   143 000000AA 51                  <1> 	push rcx 
+   144                              <1> 
+   145 000000AB 9C                  <1> 	pushfq 
+   146 000000AC FA                  <1> 	cli 
+   147                              <1> %ifdef __MP__
+   148                              <1> 	SET_SPIN_LOCK rcx, qword [rel _prn_str_locker]		; 上锁
+   149                              <1> %endif 
+   150                              <1> 
+   151                              <1> .getc:
+   152 000000AD 8A0B                <1> 	mov cl, [rbx]
+   153 000000AF 08C9                <1> 	or cl, cl 							; 检查是不是 0
+   154 000000B1 740A                <1> 	jz .exit 							; 如果是 0 跳转到退出代码
+   155 000000B3 E809000000          <1> 	call put_char 
+   156 000000B8 48FFC3              <1> 	inc rbx 
+   157 000000BB EBF0                <1> 	jmp .getc
+   158                              <1> 
+   159                              <1> .exit:
+   160                              <1> %ifdef __MP__ 
+   161                              <1> 	mov qword [rel _prn_str_locker], 0					; 释放锁
+   162                              <1> %endif
+   163 000000BD 9D                  <1> 	popfq
+   164                              <1> 
+   165 000000BE 59                  <1> 	pop rcx 
+   166 000000BF 5B                  <1> 	pop rbx 
+   167                              <1> 
+   168 000000C0 C3                  <1> 	ret 
+>>>>>>> 83ea3db (fix: 第三章终于跑通! 还是在 windows, 虚拟机上没法用 virtual-box)
    169                              <1> ; ------------------------------------------------------------
    170                              <1> ; put_char
    171                              <1> ; 功能: 在屏幕上的当前光标处显示一个字符并推进光标(ldr.asm 中 put_char 的 64 位版本)
    172                              <1> ; 输入: cl=字符ASCII码
    173                              <1> ; ------------------------------------------------------------
    174                              <1> put_char:
+<<<<<<< HEAD
    175 000000C0 50                  <1> 	push rax 
    176 000000C1 53                  <1> 	push rbx 
    177 000000C2 51                  <1> 	push rcx 
@@ -410,10 +581,109 @@
    264 00000184 58                  <1> 	pop rax 
    265                              <1> 
    266 00000185 C3                  <1> 	ret 
+=======
+   175 000000C1 50                  <1> 	push rax 
+   176 000000C2 53                  <1> 	push rbx 
+   177 000000C3 51                  <1> 	push rcx 
+   178 000000C4 52                  <1> 	push rdx 
+   179 000000C5 56                  <1> 	push rsi 
+   180 000000C6 57                  <1> 	push rdi 
+   181                              <1> 
+   182                              <1> 	; 获取光标位置
+   183 000000C7 66BAD403            <1> 	mov dx, 0x3d4
+   184 000000CB B00E                <1> 	mov al, 0x0e 
+   185 000000CD EE                  <1> 	out dx, al 
+   186 000000CE 66FFC2              <1> 	inc dx 
+   187 000000D1 EC                  <1> 	in al, dx 								; 高字
+   188 000000D2 88C4                <1> 	mov ah, al 
+   189                              <1> 
+   190 000000D4 66FFCA              <1> 	dec dx 
+   191 000000D7 B00F                <1> 	mov al, 0x0f 
+   192 000000D9 EE                  <1> 	out dx, al 
+   193 000000DA 66FFC2              <1> 	inc dx 
+   194 000000DD EC                  <1> 	in al, dx 								; 低字
+   195 000000DE 6689C3              <1> 	mov bx, ax 								; 此时 bx 中存储了字符的数目, 一个字符占两个字节
+   196 000000E1 4881E3FFFF0000      <1> 	and rbx, 0x000000000000ffff 			; 准备使用 64 位寻址方式访问显存
+   197                              <1> 
+   198 000000E8 80F90D              <1> 	cmp cl, 0x0d							; 回车符?
+   199 000000EB 750E                <1> 	jnz .put_0a
+   200 000000ED 6689D8              <1> 	mov ax, bx 
+   201 000000F0 B350                <1> 	mov bl, 80
+   202 000000F2 F6F3                <1> 	div bl 
+   203 000000F4 F6E3                <1> 	mul bl 									; 移到本行起始
+   204 000000F6 6689C3              <1> 	mov bx, ax 	
+   205 000000F9 EB6C                <1> 	jmp .set_cursor
+   206                              <1> 
+   207                              <1> .put_0a:
+   208 000000FB 80F90A              <1> 	cmp cl, 0x0a 							; 换行符?
+   209 000000FE 7506                <1> 	jnz .put_other
+   210 00000100 6683C350            <1> 	add bx, 80								; 平移一行
+   211 00000104 EB16                <1> 	jmp .roll_screen
+   212                              <1> 
+   213                              <1> .put_other:						
+   214 00000106 66D1E3              <1> 	shl bx, 1								; 转换成字节数
+   215 00000109 48B800800B000080FF- <1> 	mov rax, UPPER_TEXT_VIDEO
+   215 00000112 FF                  <1>
+   216 00000113 880C18              <1> 	mov [rax + rbx], cl 					; 写入字符
+   217                              <1> 
+   218 00000116 66D1EB              <1> 	shr bx, 1								; 转回字符数
+   219 00000119 66FFC3              <1> 	inc bx 
+   220                              <1> 
+   221                              <1> .roll_screen:
+   222 0000011C 6681FBD007          <1> 	cmp bx, 2000							; 光标超出屏幕? 滚屏
+   223 00000121 7C44                <1> 	jl .set_cursor 
+   224                              <1> 	
+   225 00000123 6653                <1> 	push bx 
+   226                              <1> 
+   227 00000125 FC                  <1> 	cld 									; 清除方向标志位
+   228 00000126 48BEA0800B000080FF- <1> 	mov rsi, UPPER_TEXT_VIDEO + 0xa0		; 源地址
+   228 0000012F FF                  <1>
+   229 00000130 48BF00800B000080FF- <1> 	mov rdi, UPPER_TEXT_VIDEO				; 目标地址
+   229 00000139 FF                  <1>
+   230 0000013A B9E0010000          <1> 	mov rcx, 480							; 480 == 24 x 80 x 2 / 8。前 24 行向上平移一行
+   231 0000013F F348A5              <1> 	rep movsq								
+   232                              <1> 
+   233 00000142 66BB000F            <1> 	mov bx, 3840							; 24 x 80 x 2。清除最后一行
+   234 00000146 B950000000          <1> 	mov rcx, 80
+   235                              <1> .cls:
+   236 0000014B 48B800800B000080FF- <1> 	mov rax, UPPER_TEXT_VIDEO
+   236 00000154 FF                  <1>
+   237 00000155 66C704182007        <1> 	mov word [rax + rbx], 0x0720
+   238 0000015B 6683C302            <1> 	add bx, 2 
+   239 0000015F E2EA                <1> 	loop .cls 
+   240                              <1> 
+   241 00000161 665B                <1> 	pop bx 									; 考虑换行符
+   242 00000163 6683EB50            <1> 	sub bx, 80
+   243                              <1> 
+   244                              <1> .set_cursor:
+   245 00000167 66BAD403            <1> 	mov dx, 0x3d4
+   246 0000016B B00E                <1> 	mov al, 0x0e 
+   247 0000016D EE                  <1> 	out dx, al 
+   248 0000016E 66FFC2              <1> 	inc dx 									; 0x3d5
+   249 00000171 88F8                <1> 	mov al, bh 
+   250 00000173 EE                  <1> 	out dx, al 
+   251                              <1> 
+   252 00000174 66FFCA              <1> 	dec dx 									; 0x3d4
+   253 00000177 B00F                <1> 	mov al, 0x0f 
+   254 00000179 EE                  <1> 	out dx, al 
+   255 0000017A 66FFC2              <1> 	inc dx 									; 0x3d5
+   256 0000017D 88D8                <1> 	mov al, bl 
+   257 0000017F EE                  <1> 	out dx, al 
+   258                              <1> 
+   259 00000180 5F                  <1> 	pop rdi 
+   260 00000181 5E                  <1> 	pop rsi 
+   261 00000182 5A                  <1> 	pop rdx 
+   262 00000183 59                  <1> 	pop rcx 
+   263 00000184 5B                  <1> 	pop rbx 
+   264 00000185 58                  <1> 	pop rax 
+   265                              <1> 
+   266 00000186 C3                  <1> 	ret 
+>>>>>>> 83ea3db (fix: 第三章终于跑通! 还是在 windows, 虚拟机上没法用 virtual-box)
     16                                  
     17                                      bits 64
     18                                  
     19                                  general_interrupt_handler:                          ; 通用中断处理
+<<<<<<< HEAD
     20 00000186 48CF                        iretq
     21                                  
     22                                  general_exception_handler:                          ; 通用异常处理
@@ -441,12 +711,42 @@
     42 000001C4 58                          pop rax 
     43                                  
     44 000001C5 48CF                        iretq
+=======
+    20 00000187 48CF                        iretq
+    21                                  
+    22                                  general_exception_handler:                          ; 通用异常处理
+    23 00000189 4C8B3D(08000000)            mov r15, [rel position]                         ; 在 24 行 0 列显示红底白字的错误信息
+    24 00000190 498D9F[A5010000]            lea rbx, [r15 + exceptm]
+    25 00000197 B618                        mov dh, 24
+    26 00000199 B200                        mov dl, 0
+    27 0000019B 41B14F                      mov r9b, 0x4f 
+    28 0000019E E85DFEFFFF                  call put_cstringxy64                            ; 在 core_utils64.asm 中实现
+    29                                  
+    30 000001A3 FA                          cli 
+    31 000001A4 F4                          hlt                                             ; 停机且不接受外部硬件中断
+    32                                  
+    33 000001A5 412065786365707469-     exceptm         db "A exception raised,halt.", 0    ; 发生异常时的错误信息
+    33 000001AE 6F6E20726169736564-
+    33 000001B7 2C68616C742E00     
+    34                                  
+    35                                  general_8259ints_handler:                           ; 通用的 8259 中断处理过程
+    36 000001BE 50                          push rax 
+    37                                  
+    38 000001BF B020                        mov al, 0x20                                    ; 中断结束命令 EOI
+    39 000001C1 E6A0                        out 0xa0, al                                    ; 向从片发送
+    40 000001C3 E620                        out 0x20, al                                    ; 向主片发送
+    41                                  
+    42 000001C5 58                          pop rax 
+    43                                  
+    44 000001C6 48CF                        iretq
+>>>>>>> 83ea3db (fix: 第三章终于跑通! 还是在 windows, 虚拟机上没法用 virtual-box)
     45                                  
     46                                  init: 
     47                                      ; 初始化内核工作环境
     48                                  
     49                                      ; 将 GDT 的线性地址映射到虚拟内存高端的相同位置。
     50                                      ; 处理器不支持 64 位立即数到内存地址的操作，所以用两条指令完成。
+<<<<<<< HEAD
     51 000001C7 48B8000001000080FF-         mov rax, UPPER_GDT_LINEAR                       ; GDT 高端线性地址
     51 000001D0 FF                 
     52 000001D1 48890425047E0000            mov qword [SDA_PHY_ADDR + 4], rax
@@ -466,11 +766,33 @@
     64 000001FF 488B05(08000000)            mov rax, [rel position]
     65 00000206 05[0D020000]                add eax, .to_upper
     66 0000020B FFE0                        jmp rax                                         ; 用 jmp 改变 rip
+=======
+    51 000001C8 48B8000001000080FF-         mov rax, UPPER_GDT_LINEAR                       ; GDT 高端线性地址
+    51 000001D1 FF                 
+    52 000001D2 48890425047E0000            mov qword [SDA_PHY_ADDR + 4], rax
+    53                                  
+    54 000001DA 0F011425027E0000            lgdt [SDA_PHY_ADDR + 2]                
+    55                                  
+    56                                      ; 将栈映射到高端
+    57                                      ; 64 位模式下不支持源操作数为 64 位立即数的加法操作。
+    58 000001E2 48B8000000000080FF-         mov rax, UPPER_LINEAR_START
+    58 000001EB FF                 
+    59 000001EC 4801C4                      add rsp, rax 
+    60                                  
+    61                                      ; 准备让处理器从虚拟地址空间的高端开始执行（现在依然在低端执行）
+    62 000001EF 48B8000000000080FF-         mov rax, UPPER_LINEAR_START
+    62 000001F8 FF                 
+    63 000001F9 480105(08000000)            add [rel position], rax                         ; 更新 position 处地址, 采用相对寻址方式
+    64 00000200 488B05(08000000)            mov rax, [rel position]
+    65 00000207 05[0E020000]                add eax, .to_upper
+    66 0000020C FFE0                        jmp rax                                         ; 用 jmp 改变 rip
+>>>>>>> 83ea3db (fix: 第三章终于跑通! 还是在 windows, 虚拟机上没法用 virtual-box)
     67                                  
     68                                  .to_upper:
     69                                      ; 接下来初始化中断描述符表 IDT，并为 32 个异常以及 224 个中断安装门描述符
     70                                  
     71                                      ; 为 32 个异常创建通用处理过程的中断门
+<<<<<<< HEAD
     72 0000020D 4C8B0D(08000000)            mov r9, [rel position]
     73 00000214 498D81[88010000]            lea rax, [r9 + general_exception_handler]
     74 0000021B E82AFEFFFF                  call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
@@ -525,5 +847,61 @@
    121                                  .halt:
    122 000002AF F4                          hlt 
    123 000002B0 EBFD                        jmp .halt
+=======
+    72 0000020E 4C8B0D(08000000)            mov r9, [rel position]
+    73 00000215 498D81[89010000]            lea rax, [r9 + general_exception_handler]
+    74 0000021C E829FEFFFF                  call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
+    75                                  
+    76 00000221 4D31C0                      xor r8, r8  
+    77                                  .idt0:                                              ; 32 个异常
+    78 00000224 E83DFEFFFF                  call mount_idt_entry                            ; 在 core_utils64.asm 中实现
+    79 00000229 49FFC0                      inc r8 
+    80 0000022C 4983F81F                    cmp r8, 31 
+    81 00000230 7EF2                        jle .idt0
+    82                                  
+    83                                      ; 创建并安装中断门
+    84 00000232 498D81[87010000]            lea rax, [r9 + general_interrupt_handler]       
+    85 00000239 E80CFEFFFF                  call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
+    86                                  
+    87 0000023E 41B820000000                mov r8, 32 
+    88                                  .idt1:
+    89 00000244 E81DFEFFFF                  call mount_idt_entry                            ; 在 core_utils64.asm 中实现
+    90 00000249 49FFC0                      inc r8 
+    91 0000024C 4981F8FF000000              cmp r8, 255
+    92 00000253 7EEF                        jle .idt1
+    93                                  
+    94 00000255 48B800E000000080FF-         mov rax, UPPER_IDT_LINEAR                       ; 中断描述符表 IDT 的高端线性地址
+    94 0000025E FF                 
+    95 0000025F 48BB007E00000080FF-         mov rbx, UPPER_SDA_LINEAR                       ; 系统数据区 SDA 的高端线性地址
+    95 00000268 FF                 
+    96 00000269 66C7430CFF0F                mov word [rbx + 0x0c], 256 * 16 - 1
+    97 0000026F 4889430E                    mov qword [rbx + 0x0e], rax                     ; 将 IDT 的线性地址和界限写入内核空间保存
+    98                                      
+    99                                  
+   100 00000273 0F015B0C                    lidt [rbx + 0x0c]                               ; 加载 IDT
+   101                                  
+   102 00000277 E80AFEFFFF                  call init_8259                                  ; 初始化 8259 中断控制器，包括重新设置中断向量号
+   103                                  
+   104 0000027C 498D81[BE010000]            lea rax, [r9 + general_8259ints_handler]        ; 得到通用 8259 中断处理过程的线性地址
+   105 00000283 E8C2FDFFFF                  call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
+   106                                  
+   107 00000288 41B820000000                mov r8, 0x20
+   108                                  .8259:
+   109 0000028E E8D3FDFFFF                  call mount_idt_entry                            ; 在 core_utils64.asm 中实现
+   110 00000293 49FFC0                      inc r8
+   111 00000296 4983F82F                    cmp r8, 0x2f                                    ; 8259 用来收集外部硬件中断信号, 提供 16 个中断向量, 将之前的覆盖
+   112 0000029A 7EF2                        jle .8259
+   113                                  
+   114 0000029C FB                          sti                                             ; 开放硬件中断
+   115                                  
+   116                                      ; 在 64 位模式下显示的第一条信息!
+   117 0000029D 4C8B3D(08000000)            mov r15, [rel position]
+   118 000002A4 498D9F[00000000]            lea rbx, [r15 + welcome]
+   119 000002AB E8F9FDFFFF                  call put_string64                               ; 在 core_utils64.asm 中实现
+   120                                  
+   121                                  .halt:
+   122 000002B0 F4                          hlt 
+   123 000002B1 EBFD                        jmp .halt
+>>>>>>> 83ea3db (fix: 第三章终于跑通! 还是在 windows, 虚拟机上没法用 virtual-box)
    124                                  
    125                                  core_end:

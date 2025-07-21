@@ -6,7 +6,6 @@
 
 	bits 64
 
-
 ; ------------------------------------------------------------
 ; put_cstringxy64
 ; 功能: 在指定位置用指定颜色显示 0 终止的字符串，只适用于打印图形字符。由于各程序打印时的坐标位置不同，互不干扰，不需要加锁和互斥。
@@ -166,6 +165,7 @@ put_string64:
 	pop rcx 
 	pop rbx 
 
+	ret 
 ; ------------------------------------------------------------
 ; put_char
 ; 功能: 在屏幕上的当前光标处显示一个字符并推进光标(ldr.asm 中 put_char 的 64 位版本)
@@ -245,14 +245,14 @@ put_char:
 	mov dx, 0x3d4
 	mov al, 0x0e 
 	out dx, al 
-	inc dx 
+	inc dx 									; 0x3d5
 	mov al, bh 
 	out dx, al 
 
-	dec dx 
+	dec dx 									; 0x3d4
 	mov al, 0x0f 
 	out dx, al 
-	inc ax 
+	inc dx 									; 0x3d5
 	mov al, bl 
 	out dx, al 
 

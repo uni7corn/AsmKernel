@@ -31,38 +31,35 @@ SECTION loader
 
 ; ------------------------------------------------------------
 ; put_string_by_bios
-; 功能: 在光标当前位置按指定颜色打印字符串
-; 输入: bp = 字符串地址, cx = 长度, bl = 颜色属性
-; 输出: 无(光标自动后移)
+; 功能: 在光标当前位置按指定颜色打印字符串, 内平栈
+; 输入: 字符串地址, 长度, 颜色属性
 ; ------------------------------------------------------------
 put_string_by_bios:
-    pusha                               ; 保存全部通用寄存器
-
     mov ah, 0x03                        ; 获取光标位置
     mov bh, 0x00
     int 0x10                            ; 返回 dh=行, dl=列
 
+    mov bp, [esp + 2]                   ; 字符串地址       
+    mov cx, [esp + 4]                   ; 长度    
+    mov bx, [esp + 6]                   ; 颜色属性
     mov ax, 0x1301                      ; 写字符串, 光标移动
-    mov bh, 0
     int 0x10
 
-    popa                                ; 恢复全部通用寄存器
-    ret
+    ret 6
 
 no_ia_32e:
-    mov bp, arch1
-    mov cx, brand_mag - arch1
-    mov bl, 0x4f
+    push 0x004f
+    push brand_mag - arch1
+    push arch1
     call put_string_by_bios
 
     cli
     hlt
 
-
 start:
-    mov bp, msg0
-    mov cx, arch0 - msg0
-    mov bl, 0x4f                        ; 红底亮白字
+    push 0x004f
+    push arch0 - msg0
+    push msg0
     call put_string_by_bios
 
     ; 检查处理器是否支持 ia-32e 模式
@@ -76,9 +73,9 @@ start:
     bt edx, 29                          ; 低 29 位是 IA-32e 模式支持标志, bt 指令会影响 cf  标志位
     jnc no_ia_32e                       ; 不支持就到 no_ia_32e 处执行
 
-    mov bp, arch0
-    mov cx, arch1 - arch0
-    mov bl, 0x07                        ; 黑底白字
+    push 0x0007                         ; 黑底白字
+    push arch1 - arch0
+    push arch0
     call put_string_by_bios
 
     ; 显示处理器商标信息
@@ -108,9 +105,9 @@ start:
     mov [brand + 0x28], ecx
     mov [brand + 0x2c], edx
 
-    mov bp, brand_mag
-    mov cx, cpu_addr - brand_mag
-    mov bl, 0x07
+    push 0x0007
+    push cpu_addr - brand_mag
+    push brand_mag
     call put_string_by_bios
 
     ; 第五章再回来填坑----
@@ -135,6 +132,7 @@ start:
     jnz .mlookup
 
     pop es
+
     ; 第五章再回来填坑----
     ; 获取存储处理器的物理/虚拟地址尺寸信息
     mov eax, 0x80000000                     
@@ -166,7 +164,7 @@ start:
     add ah, 0x30                            ; ASCII 码
     mov [paddr + si], ah                    ; 低位在高地址
     dec si 
-    add ax, 0x00ff
+    and ax, 0x00ff
     jnz .re_div0
 
     ; 准备显示处理器的虚拟地址尺寸信息
@@ -180,13 +178,13 @@ start:
     add ah, 0x30 
     mov [laddr + si], ah 
     dec si 
-    add ax, 0x00ff
+    and ax, 0x00ff
     jnz .re_div1
 
-    ; 显示处理器的物理/虚拟地址尺寸信息
-    mov bp, cpu_addr
-    mov cx, protect - cpu_addr
-    mov bl, 0x07   
+    ; 显示处理器的物理/虚拟地址尺寸信息 
+    push 0x0007
+    push protect - cpu_addr
+    push cpu_addr
     call put_string_by_bios
 
     ; 以下开始进入保护模式, 为 IA-32e 模式做必要的准备工作
