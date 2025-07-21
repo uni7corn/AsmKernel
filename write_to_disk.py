@@ -2,11 +2,8 @@ import os
 import subprocess
 
 # 硬盘路径
-<<<<<<< HEAD
-DISK_PATH = "C:/Users/Luan/VirtualBox VMs/learn_asm/learn_asm.vhd"
-=======
 DISK_PATH = "C:/Users/Luan/VirtualBox VMs/AsmKernel/AsmKernel.vhd"
->>>>>>> 83ea3db (fix: 第三章终于跑通! 还是在 windows, 虚拟机上没法用 virtual-box)
+
 
 # 扇区大小
 SECTOR_SIZE = 512
@@ -14,12 +11,9 @@ SECTOR_SIZE = 512
 # 输出二进制文件加路径
 BIN_PATH = "E:/ning/code/pc/AsmKernel/bin"
 
-<<<<<<< HEAD
-=======
 # dd 工具的路径
 DD_PATH = "C:/Users/Luan/dd-0.5/dd.exe"
 
->>>>>>> 83ea3db (fix: 第三章终于跑通! 还是在 windows, 虚拟机上没法用 virtual-box)
 def write_to_disk(bin_path, lba_sector):
     """
     将二进制文件写入硬盘文件的指定 LBA 扇区号位置。
@@ -28,17 +22,6 @@ def write_to_disk(bin_path, lba_sector):
     :param lba_sector: 目标 LBA 扇区号
     """
     try:
-        # 计算目标位置的偏移量（以字节为单位）
-        offset = lba_sector * SECTOR_SIZE
-
-<<<<<<< HEAD
-        # 使用 VBoxManage 命令将二进制文件写入指定偏移量
-        command = [
-            "VBoxManage", "internalcommands", "sethduoffset",
-            "--filename", DISK_PATH,
-            "--offset", str(offset),
-            "--file", bin_path
-=======
         # 使用 dd 命令将二进制文件写入指定偏移量
         command = [
             DD_PATH,
@@ -46,7 +29,6 @@ def write_to_disk(bin_path, lba_sector):
             f"of={DISK_PATH}",  # 输出文件
             f"bs={SECTOR_SIZE}",  # 块大小
             f"seek={lba_sector}",  # 目标扇区号
->>>>>>> 83ea3db (fix: 第三章终于跑通! 还是在 windows, 虚拟机上没法用 virtual-box)
         ]
 
         subprocess.run(command, check=True)
