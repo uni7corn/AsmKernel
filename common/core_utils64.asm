@@ -4,7 +4,7 @@
 
 %include "./common/global_defs.asm"
 
-	bits 64
+	[bits 64]
 
 ; ------------------------------------------------------------
 ; put_cstringxy64

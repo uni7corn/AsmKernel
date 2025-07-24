@@ -212,7 +212,7 @@ start:
     mov word[2], 0x1f                       ; 描述符表的界限
     mov dword[4], GDT_PHY_ADDR              ; GDT 的线性基地址
 
-    ; 加载描述符表寄存器 GDTR
+    ; 将 gdt 表的地址加载到 GDTR 寄存器
     lgdt [2]
 
     in al, 0x92                             ; 南桥芯片内的端口
@@ -247,7 +247,7 @@ flush:
 
     mov eax, COR_START_SECTOR
     mov ebx, edi                            ; 起始地址
-    call read_hard_disk_0                   ; 读取程序起始第一扇区
+    call read_hard_disk_0                   ; 读取程序起始第一个扇区
 
     ; 判断程序大小
     mov eax, [edi]                          ; 内核程序大小
@@ -378,7 +378,7 @@ pge:
     mov ebx, ia_32e + LDR_PHY_ADDR
     call put_string_flat32
 
-    ; 通过原返回的方式进入 64 位模式内核
+    ; 通过远返回的方式进入 64 位模式内核
     push word CORE_CODE64_SEL
     mov eax, dword [CORE_PHY_ADDR + 4]
     add eax, CORE_PHY_ADDR

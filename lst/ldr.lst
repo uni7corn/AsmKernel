@@ -303,7 +303,7 @@
    212 0000031A C70602001F00                mov word[2], 0x1f                       ; 描述符表的界限
    213 00000320 66C706040000000100          mov dword[4], GDT_PHY_ADDR              ; GDT 的线性基地址
    214                                  
-   215                                      ; 加载描述符表寄存器 GDTR
+   215                                      ; 将 gdt 表的地址加载到 GDTR 寄存器
    216 00000329 0F01160200                  lgdt [2]
    217                                  
    218 0000032E E492                        in al, 0x92                             ; 南桥芯片内的端口
@@ -338,7 +338,7 @@
    247                                  
    248 0000036A B809000000                  mov eax, COR_START_SECTOR
    249 0000036F 89FB                        mov ebx, edi                            ; 起始地址
-   250 00000371 E8FD010000                  call read_hard_disk_0                   ; 读取程序起始第一扇区
+   250 00000371 E8FD010000                  call read_hard_disk_0                   ; 读取程序起始第一个扇区
    251                                  
    252                                      ; 判断程序大小
    253 00000376 8B07                        mov eax, [edi]                          ; 内核程序大小
@@ -475,7 +475,7 @@
    378 000004AF BB[37F10000]                mov ebx, ia_32e + LDR_PHY_ADDR
    379 000004B4 E80F000000                  call put_string_flat32
    380                                  
-   381                                      ; 通过原返回的方式进入 64 位模式内核
+   381                                      ; 通过远返回的方式进入 64 位模式内核
    382 000004B9 666A18                      push word CORE_CODE64_SEL
    383 000004BC A104000200                  mov eax, dword [CORE_PHY_ADDR + 4]
    384 000004C1 0500000200                  add eax, CORE_PHY_ADDR

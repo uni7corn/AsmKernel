@@ -14,7 +14,7 @@ SECTION core_code                                   ; 内核代码段
 
 %include "./common/core_utils64.asm"
 
-    bits 64
+    [bits 64]
 
 general_interrupt_handler:                          ; 通用中断处理
     iretq
@@ -62,7 +62,7 @@ init:
     mov rax, UPPER_LINEAR_START
     add [rel position], rax                         ; 更新 position 处地址, 采用相对寻址方式
     mov rax, [rel position]
-    add eax, .to_upper
+    add rax, .to_upper
     jmp rax                                         ; 用 jmp 改变 rip
 
 .to_upper:

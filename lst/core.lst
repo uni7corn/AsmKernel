@@ -64,7 +64,7 @@
     61                              <1> %endif
      4                                  
      5                                  SECTION core_header                                 ; 内核头部
-     6 00000000 [B3020000]                  length      dd core_end                         ; 内核总长度
+     6 00000000 [B4020000]                  length      dd core_end                         ; 内核总长度
      7 00000004 [C8010000]                  init_entry  dd init                             ; 内核入口点
      8 00000008 0000000000000000            position    dq 0                                ; 内核加载虚拟地址
      9                                  
@@ -144,7 +144,7 @@
     60                              <2> 
     61                              <2> %endif
      6                              <1> 
-     7                              <1> 	bits 64
+     7                              <1> 	[bits 64]
      8                              <1> 
      9                              <1> ; ------------------------------------------------------------
     10                              <1> ; put_cstringxy64
@@ -411,7 +411,7 @@
    265                              <1> 
    266 00000186 C3                  <1> 	ret 
     16                                  
-    17                                      bits 64
+    17                                      [bits 64]
     18                                  
     19                                  general_interrupt_handler:                          ; 通用中断处理
     20 00000187 48CF                        iretq
@@ -464,66 +464,66 @@
     62 000001F8 FF                 
     63 000001F9 480105(08000000)            add [rel position], rax                         ; 更新 position 处地址, 采用相对寻址方式
     64 00000200 488B05(08000000)            mov rax, [rel position]
-    65 00000207 05[0E020000]                add eax, .to_upper
-    66 0000020C FFE0                        jmp rax                                         ; 用 jmp 改变 rip
+    65 00000207 4805[0F020000]              add rax, .to_upper
+    66 0000020D FFE0                        jmp rax                                         ; 用 jmp 改变 rip
     67                                  
     68                                  .to_upper:
     69                                      ; 接下来初始化中断描述符表 IDT，并为 32 个异常以及 224 个中断安装门描述符
     70                                  
     71                                      ; 为 32 个异常创建通用处理过程的中断门
-    72 0000020E 4C8B0D(08000000)            mov r9, [rel position]
-    73 00000215 498D81[89010000]            lea rax, [r9 + general_exception_handler]
-    74 0000021C E829FEFFFF                  call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
+    72 0000020F 4C8B0D(08000000)            mov r9, [rel position]
+    73 00000216 498D81[89010000]            lea rax, [r9 + general_exception_handler]
+    74 0000021D E828FEFFFF                  call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
     75                                  
-    76 00000221 4D31C0                      xor r8, r8  
+    76 00000222 4D31C0                      xor r8, r8  
     77                                  .idt0:                                              ; 32 个异常
-    78 00000224 E83DFEFFFF                  call mount_idt_entry                            ; 在 core_utils64.asm 中实现
-    79 00000229 49FFC0                      inc r8 
-    80 0000022C 4983F81F                    cmp r8, 31 
-    81 00000230 7EF2                        jle .idt0
+    78 00000225 E83CFEFFFF                  call mount_idt_entry                            ; 在 core_utils64.asm 中实现
+    79 0000022A 49FFC0                      inc r8 
+    80 0000022D 4983F81F                    cmp r8, 31 
+    81 00000231 7EF2                        jle .idt0
     82                                  
     83                                      ; 创建并安装中断门
-    84 00000232 498D81[87010000]            lea rax, [r9 + general_interrupt_handler]       
-    85 00000239 E80CFEFFFF                  call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
+    84 00000233 498D81[87010000]            lea rax, [r9 + general_interrupt_handler]       
+    85 0000023A E80BFEFFFF                  call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
     86                                  
-    87 0000023E 41B820000000                mov r8, 32 
+    87 0000023F 41B820000000                mov r8, 32 
     88                                  .idt1:
-    89 00000244 E81DFEFFFF                  call mount_idt_entry                            ; 在 core_utils64.asm 中实现
-    90 00000249 49FFC0                      inc r8 
-    91 0000024C 4981F8FF000000              cmp r8, 255
-    92 00000253 7EEF                        jle .idt1
+    89 00000245 E81CFEFFFF                  call mount_idt_entry                            ; 在 core_utils64.asm 中实现
+    90 0000024A 49FFC0                      inc r8 
+    91 0000024D 4981F8FF000000              cmp r8, 255
+    92 00000254 7EEF                        jle .idt1
     93                                  
-    94 00000255 48B800E000000080FF-         mov rax, UPPER_IDT_LINEAR                       ; 中断描述符表 IDT 的高端线性地址
-    94 0000025E FF                 
-    95 0000025F 48BB007E00000080FF-         mov rbx, UPPER_SDA_LINEAR                       ; 系统数据区 SDA 的高端线性地址
-    95 00000268 FF                 
-    96 00000269 66C7430CFF0F                mov word [rbx + 0x0c], 256 * 16 - 1
-    97 0000026F 4889430E                    mov qword [rbx + 0x0e], rax                     ; 将 IDT 的线性地址和界限写入内核空间保存
+    94 00000256 48B800E000000080FF-         mov rax, UPPER_IDT_LINEAR                       ; 中断描述符表 IDT 的高端线性地址
+    94 0000025F FF                 
+    95 00000260 48BB007E00000080FF-         mov rbx, UPPER_SDA_LINEAR                       ; 系统数据区 SDA 的高端线性地址
+    95 00000269 FF                 
+    96 0000026A 66C7430CFF0F                mov word [rbx + 0x0c], 256 * 16 - 1
+    97 00000270 4889430E                    mov qword [rbx + 0x0e], rax                     ; 将 IDT 的线性地址和界限写入内核空间保存
     98                                      
     99                                  
-   100 00000273 0F015B0C                    lidt [rbx + 0x0c]                               ; 加载 IDT
+   100 00000274 0F015B0C                    lidt [rbx + 0x0c]                               ; 加载 IDT
    101                                  
-   102 00000277 E80AFEFFFF                  call init_8259                                  ; 初始化 8259 中断控制器，包括重新设置中断向量号
+   102 00000278 E809FEFFFF                  call init_8259                                  ; 初始化 8259 中断控制器，包括重新设置中断向量号
    103                                  
-   104 0000027C 498D81[BE010000]            lea rax, [r9 + general_8259ints_handler]        ; 得到通用 8259 中断处理过程的线性地址
-   105 00000283 E8C2FDFFFF                  call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
+   104 0000027D 498D81[BE010000]            lea rax, [r9 + general_8259ints_handler]        ; 得到通用 8259 中断处理过程的线性地址
+   105 00000284 E8C1FDFFFF                  call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
    106                                  
-   107 00000288 41B820000000                mov r8, 0x20
+   107 00000289 41B820000000                mov r8, 0x20
    108                                  .8259:
-   109 0000028E E8D3FDFFFF                  call mount_idt_entry                            ; 在 core_utils64.asm 中实现
-   110 00000293 49FFC0                      inc r8
-   111 00000296 4983F82F                    cmp r8, 0x2f                                    ; 8259 用来收集外部硬件中断信号, 提供 16 个中断向量, 将之前的覆盖
-   112 0000029A 7EF2                        jle .8259
+   109 0000028F E8D2FDFFFF                  call mount_idt_entry                            ; 在 core_utils64.asm 中实现
+   110 00000294 49FFC0                      inc r8
+   111 00000297 4983F82F                    cmp r8, 0x2f                                    ; 8259 用来收集外部硬件中断信号, 提供 16 个中断向量, 将之前的覆盖
+   112 0000029B 7EF2                        jle .8259
    113                                  
-   114 0000029C FB                          sti                                             ; 开放硬件中断
+   114 0000029D FB                          sti                                             ; 开放硬件中断
    115                                  
    116                                      ; 在 64 位模式下显示的第一条信息!
-   117 0000029D 4C8B3D(08000000)            mov r15, [rel position]
-   118 000002A4 498D9F[00000000]            lea rbx, [r15 + welcome]
-   119 000002AB E8F9FDFFFF                  call put_string64                               ; 在 core_utils64.asm 中实现
+   117 0000029E 4C8B3D(08000000)            mov r15, [rel position]
+   118 000002A5 498D9F[00000000]            lea rbx, [r15 + welcome]
+   119 000002AC E8F8FDFFFF                  call put_string64                               ; 在 core_utils64.asm 中实现
    120                                  
    121                                  .halt:
-   122 000002B0 F4                          hlt 
-   123 000002B1 EBFD                        jmp .halt
+   122 000002B1 F4                          hlt 
+   123 000002B2 EBFD                        jmp .halt
    124                                  
    125                                  core_end:
