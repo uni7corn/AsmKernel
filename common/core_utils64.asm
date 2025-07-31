@@ -83,6 +83,31 @@ make_interrupt_gate:
 	ret 								; 可以参考书中 155 页的图
 
 ; ------------------------------------------------------------
+; make_tss_descriptor
+; 功能: 创建 64 位的 TSS 描述符
+; 输入: rax=TSS 的线性地址
+; 输出: rdi:rsi=TSS 描述符(LDT, TSS 描述符格式见书中 200 页)
+; ------------------------------------------------------------
+make_tss_descriptor:
+	push rax 
+
+	mov rdi, rax 
+	shr rdi, 32							; 得到门高 64 位, 存在 rdi 中
+
+	push rax 							; 借助栈构造, 先压入完整 rax, 也就是门的低 64 位, 在对其修改
+	shl qword [rsp], 16 				; 将线性地址 23~0 位移到正确位置
+	mov word [rsp], 104					; 填入段界限标准长度
+	mov al, [rsp + 5]
+	mov [rsp + 7], al 					; 将线性地址 31~24 位移到正确位置
+	mov byte [rsp + 5], 0x89 			; P=1, DPL=0, TYPE=0b1001(64 位 TSS)
+	mov byte [rsp + 6], 0				; G, 0, 0, AVL, limit
+	pop rsi								; 门低 64 位
+
+	pop rax 
+
+	ret 
+
+; ------------------------------------------------------------
 ; mount_idt_entry
 ; 功能: 在中断描述符表 IDT 中安装门描述符
 ; 输入: r8=中断向量, rdi 与 rsi 组成中断门
@@ -264,3 +289,349 @@ put_char:
 	pop rax 
 
 	ret 
+
+; ------------------------------------------------------------
+; allocate_a_4k_page
+; 功能: 分配一个 4KB 的页
+; 输出: rax=页的物理地址
+; ------------------------------------------------------------	
+_page_bit_map times 2 * 1024 / 4 / 8 db 0xff 		; 对应物理内存前 512 页(2MB), 见书中 193 页
+	times (PHY_MEMORY_SIZE - 2) * 1024 / 4 / 8		; 存放后续的页面
+_page_map_len equ $ - _page_bit_map
+
+allocate_a_4k_page:
+	xor rax, rax 
+.b1:
+	lock bts [rel _page_bit_map], rax 				; 多处理器需要 lock, 这是一个指令前缀，用于将随后的指令变成原子操作
+	jnc .b2 
+	inc rax 
+	cmp rax, _page_map_len * 8
+	jl .b1 
+
+	; 对我们这个简单的系统来说，通常不存在页面不够分配的情况。对于一个流行的系统来说, 
+	; 如果页面不够分配，需要在这里执行虚拟内存管理，即，回收已经注销的页面，或者执行页面的换入和换出。
+.b2:
+	shl rax, 12										; rax 是位数, 转换为内存要乘 4098
+
+	ret 
+
+; ------------------------------------------------------------
+; lin_to_lin_of_pml4e
+; 功能: 返回指定的线性地址所对应的 4 级头表项的线性地址
+; 输入: r13=线性地址
+; 输出: r14=对应的 4 级头表项的线性地址
+; ------------------------------------------------------------
+lin_to_lin_of_pml4e:
+	push r13 
+
+	mov r14, 0x0000_ff80_0000_0000 			; 保留 4 级头表索引部分
+	and r13, r14 	
+	shr r13, 36								; 右移到低位, 相当于偏移 = 索引 * 8
+
+	; 这个利用了递归映射, 还记得在 ldr.asm 中我们将 4 级头表中最后一个项填入了其本身的地址, 
+	; 而 0xffff_ffff_ffff_f000 这个线性地址前缀会一直访问最后一个表项, 得到的也一直是 4 级头表的地址
+	mov r14, 0xffff_ffff_ffff_f000			; 访问 4 级头表所用的地址前缀
+	add r14, r13 							
+
+	pop r13 
+
+	ret 
+
+; ------------------------------------------------------------
+; lin_to_lin_of_pdpte
+; 功能: 返回指定的线性地址所对应的页目录指针项的线性地址
+; 输入: r13=线性地址
+; 输出: r14=对应的页目录指针项的线性地址
+; ------------------------------------------------------------
+lin_to_lin_of_pdpte:
+	push r13 
+
+	mov r14, 0x0000_ffff_c000_0000			; 保留 4 级头表索引和页目录指针表索引部分
+	and r13, r14 
+	shr r13, 27								
+
+	; 同上
+	mov r14, 0xffff_ffff_ffe0_0000
+	add, r14, r13 
+
+	pop r13
+
+	ret 
+
+; ------------------------------------------------------------
+; lin_to_lin_of_pdte
+; 功能: 返回指定的线性地址所对应的页目录项的线性地址
+; 输入: r13=线性地址
+; 输出: r14=对应的页目录项的线性地址
+; ------------------------------------------------------------
+lin_to_lin_of_pdte:
+	push r13 
+
+	mov r14, 0x0000_ffff_ffe0_0000			; 保留 4 级头表索引、页目录指针表索引和页目录表
+	and r13, r14 
+	shr r13, 18								
+
+	; 同上
+	mov r14, 0xffff_ffff_c000_0000
+	add, r14, r13 
+
+	pop r13
+
+	ret 
+
+; ------------------------------------------------------------
+; lin_to_lin_of_pte
+; 功能: 返回指定的线性地址所对应的页表项的线性地址
+; 输入: r13=线性地址
+; 输出: r14=对应的页表项的线性地址
+; ------------------------------------------------------------
+lin_to_lin_of_pte:
+	push r13 
+
+	mov r14, 0x0000_ffff_ffff_f000			; 保留 4 级头表、页目录指针表、页目录表和页表的索引部分
+	and r13, r14 
+	shr r13, 9								
+
+	; 同上
+	mov r14, 0xffff_ff80_0000_0000
+	add, r14, r13 
+
+	pop r13
+
+	ret 
+
+
+; ------------------------------------------------------------
+; find_pte_for_laddr
+; 功能: 为指定的线性地址寻找到页表项线性地址
+; 注意: 不保证线程安全, 如果需要在外部加锁, 关中断. 使用了 rcx, rax, r14 寄存器, 但不负责维护内容不变, 如果需要在外部 push, pop
+; 输入: r13=线性地址
+; 输出: r14=页表项线性地址
+; ------------------------------------------------------------
+find_pte_for_laddr:
+	; 四级头表一定存在, 检查对应地址的四级头表项是否存在
+	call lin_to_lin_of_pml4e							; 得到四级头表项的线性地址
+	test qword [r14], 1									; 看 P 位是否为 1 判断表项是否存在
+	jnz .b0
+
+	; 创建并安装该线性地址所对应的 4 级头表项(创建页目录指针表)
+	call allocate_a_4k_page								; 分配一个页作为页目录指针表
+	or rax, 0x07										; rax 是分配页的物理地址, 添加属性位 U/S=R/W=P=1
+	mov [r14], rax 										; 在 4 级头表中登记 4 级头表项
+
+	; 清空刚分配的页目录指针表
+	call lin_to_lin_of_pdpte
+	shr r14, 12
+	shl r14, 12											; 得到页目录指针表的线性地址, 低 12 位是页目录指针项在页目录指针表内的偏移
+	mov rcx, 512
+.cls0:
+	mov qword [r14], 0
+	add r14, 8
+	loop .cls0
+
+.b0:
+	; 检查该线性地址对应的页目录指针项是否存在
+	call lin_to_lin_of_pdpte 							; 得到页目录指针项的线性地址
+	test qword [r14], 1									; 看 P 位是否为 1 判断表项是否存在
+	jnz .b1 
+
+	; 创建并安装该线性地址对应的页目录指针项
+	call allocate_a_4k_page								; 分配一个页作为页目录表
+	or rax, 0x07
+	mov [r14], rax 
+
+	; 清空刚分配的页目录表
+	call lin_to_lin_of_pdte 
+	shr r14, 12
+	shl r14, 12 
+	mov rcx, 512 
+.cls1:
+	mov qword [r14], 0
+	add r14, 8
+	loop .cls1 
+
+.b1:
+	; 检查该线性地址对应的页目录指针项是否存在
+	call lin_to_lin_of_pdte 
+	test qword [r14], 1
+	jnz .b2 
+
+	; 创建并安装该线性地址对应的页目录项, 即分配页表
+	call allocate_a_4k_page
+	or rax, 0x07
+	mov [r14], rax 
+
+	; 清空刚分配的页表
+	call lin_to_lin_of_pte 
+	shr r14, 12
+	shl r14, 12
+	mov rcx, 512
+
+.cls2:
+	mov qword [r14], 0
+	add r14, 8
+	loop .cls2 
+
+.b2:
+	; 检查该线性地址所对应的页表项是否存在
+	call lin_to_lin_of_pte 
+
+	ret 
+
+; ------------------------------------------------------------
+; setup_paging_for_laddr
+; 功能: 为指定的线性地址安装分页
+; 输入: r13=线性地址
+; ------------------------------------------------------------
+%ifdef __MP__
+_spaging_locker dq 0
+%endif
+
+setup_paging_for_laddr:
+	push rcx 
+	push rax 
+	push r14 
+	pushfq
+
+	cli 
+
+%ifdef __MP__
+	SET_SPIN_LOCK r14, qword [rel _spaging_locker]
+%endif 
+
+	call find_pte_for_laddr
+	test qword [r14], 1
+	jnz .exit
+
+	; 创建并安装该地址对应的页表项, 即最终分配的页
+	call allocate_a_4k_page
+	or rax, 0x07										; 设置属性
+	mov [r14], rax 
+
+.exit:
+%ifdef __MP__
+	mov qword [rel _spaging_locker], 0
+%endif
+	popfq 
+
+	pop r14 
+	pop rax 
+	pop rcx 
+
+	ret 
+; ------------------------------------------------------------
+; mapping_laddr_to_page
+; 功能: 建立线性地址到物理页的映射, 即, 为指定的线性地址安装指定的物理页
+; 输入: r13=线性地址, rax=页的物理地址（含属性）
+; ------------------------------------------------------------
+%ifdef __MP__
+_mapping_locker dq 0
+%endif
+
+mapping_laddr_to_page:
+	push rcx 
+	push r14 
+	pushfq
+
+	cli 
+
+%ifdef __MP__
+	SET_SPIN_LOCK r14, qword [rel _mapping_locker]
+%endif
+
+	push rax 
+	call find_pte_for_laddr								; 得到页表项的线性地址
+	pop rax 
+	mov [r14], rax 										; 在页表项中写入页的物理地址
+
+%ifdef __MP__
+	mov qword [rel _mapping_locker], 0
+%endif
+
+	popfq
+	pop r14 
+	pop rcx 
+
+	ret 
+; ------------------------------------------------------------
+; core_memory_allocate
+; 功能: 在虚拟地址空间的高端（内核）分配内存
+; 输入: rcx=请求分配的字节数
+; 输出: r13=本次分配的起始线性地址, r14=下次分配的起始线性地址
+; ------------------------------------------------------------
+_core_next_linear dq CORE_ALLOC_START
+
+%ifdef __MP__
+_core_alloc_locker dq 0
+%endif
+
+core_memory_allocate:
+	pushfq 
+	cli 
+%ifdef __MP__
+	SET_SPIN_LOCK r14, qword [rel _core_alloc_locker]
+%endif
+	mov r13, [rel _core_next_linear]					; 起始地址
+	lea r14, [r13 + rcx]								; 下次分配的起始地址
+
+	test r14, 0x07 										; 进行 8 字节对齐处理
+	jz .algn
+	add r14, 0x08
+	shr r14, 3
+	shl r14, 3											; 最低的 3 个比特变 0
+
+.algn:
+	mov qword [rel _core_next_linear], r14 				; 写回, 保留, 下一次用
+
+%ifdef __MP__
+	mov qword [rel _core_alloc_locker], 0
+%endif
+
+	popfq
+
+	push r13 
+	push r14 
+
+	; 以下为请求的内存分配页。R13 为本次分配的线性地址；R14 为下次分配的线性地址
+	shr r13, 12
+	shl r13, 12											; 清除页内偏移
+	shr r14, 12
+	shl r14, 12
+.next:
+	call setup_paging_for_laddr							; 安装线性地址所在页
+	add r13, 0x1000
+	cmp r13, r14 
+	jle .next 
+
+	pop r14 
+	pop r13 
+
+	ret 
+
+; ------------------------------------------------------------
+; copy_current_pml4
+; 功能: 创建新的 4 级头表，并复制当前 4 级头表的内容
+; 输出: rax=新 4 级头表的物理地址及属性
+; ------------------------------------------------------------
+%ifdef __MP__
+_copy_locker dq 0
+%endif
+
+copy_current_pml4:
+	push rsi 
+	push rdi 
+	push r13 
+	push rcx 
+	pushfq
+
+	cli 
+
+%ifdef __MP__
+	SET_SPIN_LOCK rcx, qword [rel _copy_locker]
+%endif
+
+	call allocate_a_4k_page						; 分配一个物理页
+	or rax, 0x07 								; 添加属性
+	mov r13, NEW_PML4_LINEAR					; 用指定的线性地址映射和访问刚分配的这个物理页
+	call mapping_laddr_to_page
+
