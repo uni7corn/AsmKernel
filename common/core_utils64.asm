@@ -291,6 +291,81 @@ put_char:
 	ret 
 
 ; ------------------------------------------------------------
+; read_hard_disk_0
+; 功能: 从硬盘读取一个逻辑扇区
+; 输入: rax=逻辑扇区号, rbx=目标缓冲区线性地址
+; 输出: rbx=rbx+512
+; ------------------------------------------------------------
+%ifdef __MP__
+_read_hdd_locker dq 0						
+%endif
+
+read_hard_disk_0:
+	push rax 
+	push rcx 
+	push rdx 
+	pushfq
+
+	cli 
+
+%ifdef __MP__
+	SET_SPIN_LOCK rdx, qword [rel _read_hdd_locker]
+%endif
+
+	push rax 
+
+	mov dx, 0x1f2 								; 0x1f2
+	mov al, 1
+	out dx, al 									; 读取扇区数
+
+	inc dx 										; 0x1f3 
+	pop rax 
+	out dx, al 									; LBA 地址 7~0
+
+	mov cl, 8 
+
+	inc dx 										; 0x1f4
+	shr rax, cl 
+	out dx, al 									; LBA 地址 15~8
+
+	inc dx 										; 0x1f5
+	shr rax, cl 
+	out dx, al 									; LBA 地址 23~16
+
+	inc dx 										; 0x1f6
+	shr rax, cl 
+	or al, 0xe0 								; 第一硬盘, LBA 地址 27~24
+	out dx, al 
+
+	inc dx 										; 0x1f6
+	mov al, 0x20 								; 读命令
+	out dx, al 
+
+.waits:
+	in al, dx 
+	test al, 8
+	jz .waits
+	; 不忙且硬盘已经准备好传输数据
+	mov rax, 256								; 总共要读的字数=2字节
+	mov dx, 0x1f0 
+.readw:
+	in ax, dx 
+	mov [rbx], ax 
+	add rbx, 2
+	loop .readw 
+
+%ifdef __MP__
+	mov qword [rel _read_hdd_locker], 0
+%endif
+
+	popfq
+	pop rdx 
+	pop rcx 
+	pop rax 
+
+	ret 
+
+; ------------------------------------------------------------
 ; allocate_a_4k_page
 ; 功能: 分配一个 4KB 的页
 ; 输出: rax=页的物理地址
@@ -609,6 +684,45 @@ core_memory_allocate:
 	ret 
 
 ; ------------------------------------------------------------
+; user_memory_allocate
+; 功能: 在用户任务的私有空间（低端）分配内存
+; 输入: r11=任务控制块 PCB 的线性地址, rcx=希望分配的字节数
+; 输出: r13=本次分配的起始线性地址, r14=下次分配的起始线性地址
+; ------------------------------------------------------------
+user_memory_allocate:
+	mov r13, [r11 + 24]								; 获得本次分配的起始线性地址
+	lea r14, [r13 + rcx]							; 下次分配的起始线性地址
+
+	test r14, 0x07									; 是否按 8 字节对齐
+	jz .algn
+	shr r14, 3 										; 8 字节向上取整
+	shl r14, 3 
+	add r14, 0x08 
+
+.algn:
+	mov [r11 + 24], r14 							; 写回 PCB 中
+
+	push r13 
+	push r14 
+
+	; 以下为请求的内存分配页
+	shr r13, 12										; 清除页内便宜
+	shl r13, 12
+	shr r14, 12
+	shl r14, 12
+
+.next:
+	call setup_paging_for_laddr						; 为当前线性地址安装页
+	add r13, 0x1000
+	cmp r13, r14 
+	jle .next
+
+	pop r14
+	pop r13 
+
+	ret 
+
+; ------------------------------------------------------------
 ; copy_current_pml4
 ; 功能: 创建新的 4 级头表，并复制当前 4 级头表的内容
 ; 输出: rax=新 4 级头表的物理地址及属性
@@ -635,3 +749,26 @@ copy_current_pml4:
 	mov r13, NEW_PML4_LINEAR					; 用指定的线性地址映射和访问刚分配的这个物理页
 	call mapping_laddr_to_page
 
+	; 目标表项在页部件的转换速查缓冲器 TLB 的缓存, 需要用 invlpg 执行刷新
+	invlpg [r13]
+
+	mov rsi, 0xffff_ffff_ffff_f000				; rsi -> 当前活动4级头表的线性地址(还是利用递归映射)
+	mov rdi, r13 								; rdi -> 新 4 级头表的线性地址
+	mov rcx, 512								; rcx -> 要复制的目录项数
+	cld 										; 将 RFLAGS 中的方向标志位（DF）设置为 0, 即地址自动递增
+	repe movsq
+
+	mov [r13 + 0xff8], rax 						; 0xff8 = 512 * 8, 新 4 级头表的 511 号表项指向它自己, 方便递归映射 
+	invlpg [r13 + 0xff8]
+
+%ifdef __MP__
+	mov qword [rel _copy_locker], 0
+%endif
+
+	popfq
+	pop rcx 
+	pop r13
+	pop rdi 
+	pop rsi 
+
+	ret 

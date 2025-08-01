@@ -118,11 +118,95 @@ create_process:
     call copy_current_pml4                          ; 在 core_utils64.asm 中实现
     mov [r11 + 56], rax                             ; 填写 PCB 的 CR3, 默认 PCD=PWT=0(这两个属性忘记的话可以看看书中 123 页)
 
-    ; 以下，切换到新任务的地址空间，并清空其4级头表的前半部分。
+    ; 以下，切换到新任务的地址空间，并清空其 4 级头表的前半部分。
     ; 我们正在地址空间的高端执行，可正常执行内核代码并访问内核数据，同时，当前使用的栈位于地址空间高端的栈。
-    mov r15, cr3                                    ; 保存控制寄存器
+    mov r15, cr3                                    ; 保存控制寄存器, 本次是临时切换, 还要再切回来
     mov cr3, rax                                    ; 切换到新四级头表的新地址空间
 
+    ; 清空四级头表的前半部分, 即局部地址
+    mov rax, 0xffff_ffff_ffff_f000                  ; 四级头表线性地址, 还是递归映射...
+    mov rcx, 256
+.clsp:
+    mov qword [rax], 0
+    add rax, 8
+    loop .clsp
+
+    mov rax, cr3                                    ; 刷新 TLB
+    mov cr3, rax 
+
+    ; 为新任务分配 0 特权级使用的栈空间
+    mov rcx, 4096 * 16                              ; 在内核地址开辟空间
+    call core_memory_allocate
+    mov [r11 + 32], r14                             ; 填入 PCB 中 RSP0, 满减栈, 所以写入结尾地址
+
+    ; 为新任务分配 3 特权级使用的栈空间
+    mov rcx, 4096 * 16                              ; 在用户地址开辟空间
+    call user_memory_allocate
+    mov [r11 + 120], r14                            ; 填入 PCB 中 RSP
+
+    mov qword [r11 + 16], 0                         ; PCB 中的任务状态填为就绪    
+
+    ; 以下开始加载用户程序
+    mov rcx, 512                                    ; 在用户空间开辟一个缓冲区
+    call user_memory_allocate
+    mov rbx, r13 
+    mov rax, r8                                     ; r8 中存的用户程序起始扇区号         
+    call read_hard_disk_0
+
+    mov [r13 + 16], r13                             ; 在程序头填写它自己的起始线性地址
+    mov r14, r13 
+    add r14, [r13 + 8]
+    mov [r11 + 192], r14                            ; 在 PCB 中登记程序入口的线性地址
+
+    ; 以下读取程序剩下代码
+    mov rcx, [r13]                                  ; 程序尺寸(在程序头部记录)
+    test rcx, 0x1ff                                 ; 能被 512 整除吗?
+    jz .y512
+    shr rcx, 9                                      ; 不能就凑整
+    shl rcx, 9
+    add rcx, 512
+.y512:
+    sub rcx, 512                                    ; 减去已读一个扇区的长度
+    jz .rdok 
+    call user_memory_allocate                       ; 先分配内存在读数据
+    shr rcx, 9                                      ; 除以 512, 计算还需要读的扇区数
+    inc rax                                         ; 起始扇区号
+.b1:
+    call read_hard_disk_0
+    inc rax 
+    loop .b1 
+
+.rdok:
+    mov qword [r11 + 200], USER_CODE64_SEL          ; 填写 PCB 中代码段选择子
+    mov qword [r11 + 208], USER_STACK64_SEL         ; 填写 PCB 中栈段选择子
+
+    pushfq
+    pop qword [r11 + 232]                           ; 填写 PCB 中 RFLAGS
+
+    call generate_process_id
+    mov [r11 + 8], rax                              ; 填入 PCB 中当前任务标识
+
+    call append_to_pcb_link                         ; 将 PCB 添加到进程控制链表尾部
+
+    mov cr3, r15                                    ; 切换到原任务地址空间
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+
+    ret
 ; ------------------------------------------------------------
 ; syscall_procedure
 ; 功能: 系统调用的处理过程
