@@ -46,7 +46,7 @@ general_exception_handler:
     cli 
     hlt                                             ; 停机且不接受外部硬件中断
 
-exceptm         db "A exception raised,halt.", 0    ; 发生异常时的错误信息
+exceptm         db "A exception raised, halt.", 0    ; 发生异常时的错误信息
 
 ; ------------------------------------------------------------
 ; general_8259ints_handler
@@ -475,7 +475,7 @@ init:
     ; 安装任务状态段 TSS 的描述符, 见书中 200 页
     mov rcx, 104                                    ; TSS 标准长度
     call core_memory_allocate                       ; 在 core_utils64.asm 中实现
-    mov [rel, tss_ptr], r13 
+    mov [rel tss_ptr], r13 
     mov rax, r13 
     call make_tss_descriptor                        ; 在 core_utils64.asm 中实现
     mov qword [rbx + 32], rsi                       ; TSS 描述符低 64 位
@@ -489,7 +489,7 @@ init:
     ltr cx                                          ; 使用 ltr 指令加载 TSS 选择子
 
     ; 为快速系统调用 syscall 和 sysret 准备参数, 详细见书中 180-185
-    mov eax, 0x0c0000080                            ; 指定型号专属寄存器 IA32_EFER
+    mov ecx, 0x0c0000080                            ; 指定型号专属寄存器 IA32_EFER
     rdmsr
     bts eax, 0                                      ; 置位 SCE 位, 允许 syscall 和 sysret
     wrmsr

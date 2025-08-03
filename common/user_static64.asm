@@ -17,7 +17,7 @@ bin64_to_dec:
     bt r8, 63                                       ; 检查最高位, 处理正,负数
     jnc .begin
     mov byte [rbx], "-"
-    neg r8, 10                                      ; 取反, 将负数转为正数
+    neg r8                                          ; 取反, 将负数转为正数
 
     inc rbx
 

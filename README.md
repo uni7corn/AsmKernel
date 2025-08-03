@@ -9,6 +9,10 @@
 - 没有用李忠前辈提供的编译、写入硬盘等工具, 自己写了脚本, 感觉图形化界面让我有些恐惧(不知道它做了什么, 出了问题我束手无策)。
     - 编译: makefile + nmake(make) + nasm
     - 写入硬盘: py 脚本(调用 dd 写入硬盘)
-
+    ```bash
+    nmake
+    python.exe ./write_to_disk.py
+    nmake; python.exe ./write_to_disk.py
+    ```
 ## 伟大的作品！
 ![alt text](image/begin.JPG)

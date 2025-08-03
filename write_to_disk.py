@@ -48,7 +48,9 @@ def main():
     write_dict = {
         "mbr": 0,
         "ldr": 1,
-        "core": 9
+        "core": 9,
+        "shell": 50,
+        "userapp": 100
     }
 
     # 调用写入函数

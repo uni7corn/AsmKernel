@@ -39,10 +39,10 @@ main:
 
 .cusum:
     add r8, r10 
-    lea rbx, [r12, cusum]
+    lea rbx, [r12 + cusum]
     call bin64_to_dec                           ; 本次相加的结果转为字符串
     xchg r8, r10 
-    lea rbx, [r12, + addend]
+    lea rbx, [r12 + addend]
     call bin64_to_dec                           ; 将本次加数转为字符串
     xchg r8, r10 
 
@@ -70,7 +70,7 @@ main:
     inc r10 
     cmp r10, 100000
     jle .cusum
-    
+
     ret 
 
 start:
