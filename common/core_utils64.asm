@@ -1,4 +1,4 @@
-; 内核通用程序
+; 内核通用代码
 
 ; 在多处理器环境中使用时, 需要在内核程序中定义宏 __MP__
 
@@ -770,5 +770,113 @@ copy_current_pml4:
 	pop r13
 	pop rdi 
 	pop rsi 
+
+	ret 
+
+; ------------------------------------------------------------
+; get_cmos_time
+; 功能: 从 CMOS 中获取当前时间, 详情见书中 225 页
+; 输入: rbx=缓冲区线性地址
+; ------------------------------------------------------------
+%ifdef __MP__
+_cmos_locker dq 0
+%endif
+
+get_cmos_time:
+	push rax 
+	pushfq
+	cli 
+
+%ifdef __MP__
+	SET_SPIN_LOCK rax, qword [rel _cmos_locker]
+%endif
+
+.w0:
+	mov al, 0x8a 
+	out 0x70, al 
+	in al, 0x71 								; 读寄存器 A
+	test al, 0x80 								; 测试第 7 位 UIP, 等待更新周期结束
+	jnz .w0 
+
+	mov al, 0x84 
+	out 0x70, al 
+	in al, 0x71 								; 读RTC当前时间(时)
+	mov ah, al 									; BCD 编码, 用两个寄存器处理
+
+	shr ah, 4									; 处理高四位						
+	and ah, 0x0f 
+	add ah, 0x30 								; 转换成 ASCII
+	mov [rbx], ah 
+
+	and al, 0x0f 								; 处理低四位
+	add al, 0x30 
+	mov [rbx + 1], al 
+
+	mov byte [rbx + 2], ":"
+
+	mov al, 0x82 
+	out 0x70, al 
+	in al, 0x71									; 读RTC当前时间(分)
+	mov ah, al 
+
+	shr ah, 4			
+	and ah, 0x0f 
+	add ah, 0x30 
+	mov [rbx + 3], ah 
+
+	and al, 0x0f 
+	add al, 0x30 
+	mov [rbx + r], al 
+
+	mov byte [rbx + 5], ":"
+
+	mov al, 0x80 
+	out 0x70, al 
+	in al, 0x71									; 读RTC当前时间(秒)
+	mov ah, al 
+
+	shr ah, 4
+	and ah, 0x0f 
+	add ah, 0x30
+	mov [rbx + 6], ah 
+
+	and al, 0x0f 
+	add al, 0x30 
+	mov [rbx + 7], al 
+
+	mov byte [rbx + 8], 0						; 终止字符
+
+%ifdef __MP__
+	mov qword [rel _cmos_locker], 0
+%endif
+
+	popfq
+	pop rax 
+
+	ret 
+
+; ------------------------------------------------------------
+; generate_process_id
+; 功能: 生成唯一的进程标识
+; 输出: rax=进程标识
+; ------------------------------------------------------------
+_process_id dq 0
+
+generate_process_id:
+	mov rax, 1
+	lock xadd qword [rel _process_id], rax 		; lock 前缀确保这条指令是原子操作, xadd 是 "交换并相加" 指令, 会将源操作数和目的操作数相加，结果存入目的操作数，同时将目的操作数的原始值存入源操作数
+	
+	ret 
+
+; ------------------------------------------------------------
+; get_screen_row
+; 功能: 返回下一个屏幕坐标行的行号
+; 输出: dh=行号
+; ------------------------------------------------------------
+_screen_row db 8 								; 前边已经显示了 7 行, 所以从 8 开始
+
+get_screen_row:
+	mov dh, 1
+	lock xadd byte [rel _screen_row], dh 
 
 	ret 

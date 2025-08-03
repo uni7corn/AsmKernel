@@ -10,7 +10,7 @@ SECTION core_header                                 ; 内核头部
 SECTION core_data                                   ; 内核数据段
     welcome     db "Executing in 64-bit mode.", 0x0d, 0x0a, 0   
     tss_ptr     dq 0                                ; 任务状态段 TSS 从此处开始
-    sys_entry   dq get_screen_row
+    sys_entry   dq get_screen_row                   ; syscall 支持的功能
                 dq get_cmos_time
                 dq put_cstringxy64
                 dq create_process
@@ -68,6 +68,8 @@ general_8259ints_handler:
 ; 功能: 实时时钟中断处理过程(任务切换)
 ; ------------------------------------------------------------
 rtm_interrupt_handle:
+    ; 进入中断时, 硬件自动关闭可屏蔽中断, iret 指令自动恢复中断发生前的 IF 状态，无需软件手动设置
+
     push r8 
     push rax 
     push rbx 
@@ -81,12 +83,156 @@ rtm_interrupt_handle:
     in al, 0x71                                     ; 读一下 RTC 的寄存器C, 否则只发生一次中断, 此处不考虑闹钟和周期性中断的情况
 
     ; 以下开始执行任务切换
-    ; 任务切换的原理是, 它发生在所有任务的全局空间。在任务 A 的全局空间执行任务切换，切换到任务B, 实际上也是从任务B的全局空间返回任务B的私有空间。
-; ...
+    ; 任务切换的原理是, 它发生在所有任务的全局空间。在任务 A 的全局空间执行任务切换，切换到任务 B, 实际上也是从任务 B 的全局空间返回任务B的私有空间。
+
+    ; 从 PCB 链表中寻找就绪任务
+    mov r8, [rel cur_pcb]                           ; 定位当前任务的 PCB 节点
+.again:
+    mov r8, [r8 + 280]                              ; 获取下一个节点
+    cmp r8, [rel cur_pcb]                           ; 是否转一圈回到当前节点?
+    jz .return                                      ; 返回
+ 
+    cmp qword [r8 + 16], 0                          ; 是否是就绪任务?
+    jz .found                                       ; 切换任务
+    jmp .again  
+
+.found:
+    mov rax, [rel cur_pcb]                          ; 取得当前任务的 PCB 的线性地址
+    cmp qword [rax + 16], 2                         ; 当前任务可能已经被标记为终止, 我们就不用保存当前任务状态
+    jz .restore
+
+    ; 保存当前任务的状态以便将来恢复执行
+    mov qword [rax + 16], 0                         ; 置任务状态为就绪
+    ; mov [rax + 64], rax                           ; 不需设置，将来恢复执行时从栈中弹出, 因为下面把当前任务的 rip 设置成了 .return, 也就是, 当这个任务在被切换到时, 会从 .return 开始执行, pop rax ...
+    ; mov [rax + 72], rbx                           ; 不需设置，将来恢复执行时从栈中弹出
+    mov [rax + 80], rcx
+    mov [rax + 88], rdx
+    mov [rax + 96], rsi
+    mov [rax + 104], rdi
+    mov [rax + 112], rbp
+    mov [rax + 120], rsp
+    ; mov [rax + 128], r8                           ; 不需设置，将来恢复执行时从栈中弹出
+    mov [rax + 136], r9
+    mov [rax + 144], r10
+    mov [rax + 152], r11
+    mov [rax + 160], r12
+    mov [rax + 168], r13
+    mov [rax + 176], r14
+    mov [rax + 184], r15
+    mov rbx, [rel position]
+    lea rbx, [rbx + .return]
+    mov [rax + 192], rbx                            ; RIP 为中断返回点
+    mov [rax + 200], cs
+    mov [rax + 208], ss
+    pushfq
+    pop qword [rax + 232]
+
+.restore:
+    ; 恢复新任务的状态
+    mov [rel cur_pcb], r8                           ; 将当前任务设置为新任务
+    mov qword [r8 + 16], 1                          ; 置任务状态为忙
+
+    mov rax, [r8 + 32]                              ; 取 PCB 中的 RSP0
+    mov rbx, [rel tss_ptr]
+    mov [rbx + 4], rax                              ; 置 TSS 的 RSP0
+
+    mov rax, [r8 + 56]                              ; 设置 cr3, 切换地址空间
+    mov cr3, rax 
+
+    mov rax, [r8 + 64]
+    mov rbx, [r8 + 72]
+    mov rcx, [r8 + 80]
+    mov rdx, [r8 + 88]
+    mov rsi, [r8 + 96]
+    mov rdi, [r8 + 104]
+    mov rbp, [r8 + 112]
+    mov rsp, [r8 + 120]
+    mov r9, [r8 + 136]
+    mov r10, [r8 + 144]
+    mov r11, [r8 + 152]
+    mov r12, [r8 + 160]
+    mov r13, [r8 + 168]
+    mov r14, [r8 + 176]
+    mov r15, [r8 + 184]
+
+    push qword [r8 + 208]                           ; SS
+    push qword [r8 + 120]                           ; RSP
+    push qword [r8 + 232]                           ; RFLAGS
+    push qword [r8 + 200]                           ; CS
+    push qword [r8 + 192]                           ; RIP
+
+    mov r8, [r8 + 128]                              ; 恢复 R8 的值
+
+    iretq                                           ; 转入新任务局部空间执行
+
+.return:
+    pop rbx 
+    pop rax 
+    pop r8 
+
+    iretq
+
+; ------------------------------------------------------------
+; append_to_pcb_link
+; 功能: 在 PCB 链上追加任务控制块
+; 输入: r11=PCB 线性基地址
+; ------------------------------------------------------------
+append_to_pcb_link:
+    push rax 
+    push rbx 
+
+    cli 
+
+    mov rbx, [rel pcb_ptr]                          ; 取得链表首节点的线性地址
+    or rbx, rbx 
+    jnz .not_empty                                  ; 链表非空就跳转
+    mov [r11], r11                                  ; 唯一的节点, 前驱是自己
+    mov [r11 + 280], r11                            ; 后继节点也是自己
+    mov [rel pcb_ptr], r11                          ; 填入内核
+    jmp .return 
+
+.not_empty:
+    ; rbx=头节点, rax=头节点的前驱节点, r11=追加的节点
+    mov rax, [rbx]                                  ; 取得头节点的前驱线性地址
+    mov [rax + 280], r11                            ; 头节点的后继是追加节点
+    mov [r11 + 280], rbx                            ; 追加节点的后继是头节点
+    mov [r11], rax                                  ; 追加节点的前驱是头节点的前驱
+    mov [rbx], r11                                  ; 头节点的前驱是追加节点
+
+.return:
+    sti 
+
+    pop rbx 
+    pop rax 
+
+    ret 
+
+; ------------------------------------------------------------
+; get_current_pid
+; 功能: 返回当前任务（进程）的标识
+; 输出: rax=当前任务（进程）的标识
+; ------------------------------------------------------------
+get_current_pid:
+    mov rax, [rel cur_pcb]
+    mov rax, [rax + 8]
+
+    ret 
+
+; ------------------------------------------------------------
+; terminate_process
+; 功能: 终止当前任务
+; ------------------------------------------------------------
+terminate_process:
+    cli                                             ; 执行流改变期间禁止时钟中断引发的任务切换
+
+    mov rax, [rel cur_pcb]                          ; 定位到当前任务的 PCB 节点
+    mov qword [rax + 16], 2                         ; 状态=终止
+    
+    jmp rtm_interrupt_handle                        ; 执行任务调度, 将控制权交给处理器
 
 ; ------------------------------------------------------------
 ; create_process
-; 功能: 创建新的任务
+; 功能: 创建新的任务, 即分配好空间, 创建并填入 PCB
 ; 输入: r8=程序的起始逻辑扇区号
 ; ------------------------------------------------------------
 create_process:
@@ -210,7 +356,7 @@ create_process:
 ; ------------------------------------------------------------
 ; syscall_procedure
 ; 功能: 系统调用的处理过程
-; 注意: RCX 和 R11 由处理器使用, 保存 RIP 和 RFLAGS 的内容; RBP 和 R15 由此例程占用. 如有必要, 请用户程序在调用 syscall 前保存它们, 在系统调用返回后自行恢复.
+; 注意: rcx 和 r11 由处理器使用, 保存 rip 和 rflags 的内容; rbp 和 r15 由此例程占用. 如有必要, 请用户程序在调用 syscall 前保存它们, 在系统调用返回后自行恢复.
 ; ------------------------------------------------------------
 syscall_procedure: 
     mov rbp, rsp 
@@ -342,16 +488,16 @@ init:
     mov cx, 0x0040                                  ; TSS 描述符选择子
     ltr cx                                          ; 使用 ltr 指令加载 TSS 选择子
 
-    ; 为快速系统调用 syscall 和 sysret 准备参数
+    ; 为快速系统调用 syscall 和 sysret 准备参数, 详细见书中 180-185
     mov eax, 0x0c0000080                            ; 指定型号专属寄存器 IA32_EFER
     rdmsr
     bts eax, 0                                      ; 置位 SCE 位, 允许 syscall 和 sysret
     wrmsr
 
-    mov ecx, 0xc0000081                             ; IA32_STAR
-    mov edx, (RESVD_DESC_SEL << 16) | CORE_CODE64_SEL ; 高 32 位 
+    mov ecx, 0xc0000081                             ; IA32_STAR, syscall 会自动切换代码段寄存器（CS）到内核态的代码段，其值来自 IA32_STAR
+    mov edx, (RESVD_DESC_SEL << 16) | CORE_CODE64_SEL ; 高 32 位, RESVD_DESC_SEL 是用户态代码段选择子（返回用户态时使用）, CORE_CODE64_SEL 是内核态代码段选择子（进入内核态时使用）
     xor eax, eax                                    ; 低 32 位
-    wrmsr
+    wrmsr                                           
 
     mov ecx, 0xc0000082                             ; IA32_LSTAR
     mov rax, [rel position]
@@ -410,10 +556,10 @@ init:
 
     push qword [rbx + 208]                          ; 用户程序的 SS
     push qword [rbx + 120]                          ; 用户程序的 RSP
-    pushfq
+    pushfq                                          ; 用户程序的 RFLGAS
     push qword [rbx + 200]                          ; 用户程序的 CS
     push qword [rbx + 192]                          ; 用户程序的 RIP
 
-    iretq                                           ; 返回当前任务的私有空间执行
+    iretq                                           ; 返回当前任务的私有空间执行, 弹出 rip, cs, rflags, rsp, ss 跳转
 
 core_end:
