@@ -8,16 +8,30 @@ SECTION core_header                                 ; 内核头部
     position    dq 0                                ; 内核加载虚拟地址
 
 SECTION core_data                                   ; 内核数据段
-    welcome     db "Executing in 64-bit mode.", 0x0d, 0x0a, 0   
-    tss_ptr     dq 0                                ; 任务状态段 TSS 从此处开始
-    sys_entry   dq get_screen_row                   ; syscall 支持的功能
+    acpi_error  db "ACPI is not supported or data error.", 0x0d, 0x0a, 0
+
+    num_cpus    db 0                                ; 逻辑处理器数量
+    cpu_list    times 256 db 0                      ; Local APIC ID的列表
+    lapic_addr  dd 0                                ; Local APIC 的物理地址
+
+    ioapic_addr dd 0                                ; I/O APIC 的物理地址
+    ioapic_id   db 0                                ; I/O APIC ID
+
+    clocks_1ms  dd 0                                ; 处理器在1ms内经历的时钟数
+
+    welcome     db "Executing in 64-bit mode.", 0x0d, 0x0a, 0
+    tss_ptr     dq 0                                ; 任务状态段TSS从此处开始
+
+    sys_entry   dq get_screen_row
                 dq get_cmos_time
                 dq put_cstringxy64
                 dq create_process
                 dq get_current_pid
                 dq terminate_process
-    pcb_ptr     dq 0                                ; 进程控制块 PCB 首节点的线性地址
-    cur_pcb     dq 0                                ; 当前任务的 PCB 线性地址    
+
+    pcb_ptr     dq 0                                ; 进程控制块PCB首节点的线性地址
+    cur_pcb     dq 0                                ; 当前任务的PCB线性地址 
+
 SECTION core_code                                   ; 内核代码段
 
 %include "./common/core_utils64.asm"
@@ -511,33 +525,237 @@ init:
     mov eax, 0x00047700                             ; 将 TF, IF, DF, IOPL, AC 清零, 其他保持不变, 可看书 185 页的图
     wrmsr
 
-    ; 以下安装用于任务切换的实时时钟中断处理过程
-    mov r9, [rel position]
-    lea rax, [r9 + rtm_interrupt_handle]            ; 得到中断处理过程的线性地址
-    call make_interrupt_gate
+    ; 以下初始化高级可编程中断控制器 APIC。在计算机启动后，BIOS已经对 LAPIC 和 IOAPIC 做了
+    ; 初始化并创建了相关的高级配置和电源管理接口（ACPI）表项。可以从中获取多处理器和
+    ; APIC 信息。英特尔架构的个人计算机（IA-PC）从 1MB 物理内存中搜索获取；启用可扩展固件
+    ; 接口（EFI或者叫UEFI）的计算机需使用 EFI 传递的 EFI 系统表指针定位相关表格并从中获取
+    ; 多处理器和 APIC 信息。为简单起见，我们采用前一种传统的方式。请注意虚拟机的配置！
 
+    ; ACPI 申领的内存区域已经保存在我们的系统数据区（SDA），以下将其读出。此内存区可能
+    ; 位于分页系统尚未映射的部分，故以下先将这部分内存进行一一映射（线性地址=物理地址）
+    cmp word [SDA_PHY_ADDR + 0x16], 0               ; 检查检查地址范围描述结构的数量是否为 0
+    jz .acpi_err                                    ; 除非 bios 不支持 acpi, 否则不会是 0
+    mov rsi, SDA_PHY_ADDR + 0x18                    ; 系统数据区, 地址范围描述结构的起始地址
+.looking:
+    cmp dword [rsi + 16], 3                         ; 3 代表是 ACPI 申领的内存, ACPI 的介绍可以看书中 257 页
+    jz .looked
+    add rsi, 32                                     ; 每个地址范围描述结构的长度
+    loop .looking
+
+.acpi_err:
+    mov r15, [rel position]
+    lea rbx, [r15 + acpi_error]
+    call put_cstringxy64
     cli 
+    hlt 
 
-    mov r8, 0x28                                    ; 使用 0x20 时, 应调整 bochs 的时间速率
-    call mount_idt_entry
+.looked:
+    mov rbx, [rsi]                                  ; ACPI 申领的起始物理地址
+    mov rcx, [rsi + 8]                              ; ACPI 申领的内存大小, 以字节计
+    add rcx, rbx                                    ; ACPI 申领的内存上边界
+    mov rdx, 0xffff_ffff_ffff_f000                  ; 用于生成页地址的掩码
 
-    ; 设置与时钟中断相关的硬件
+.mapping:
+    mov r13, rbx                                    ; 映射的线性地址
+    mov rax, rbx 
+    and rax, rdx 
+    or rax, 0x07                                    ; 将地址设置上属性
+    call mapping_laddr_to_page
+    add rbx, 0x1000
+    cmp rbx, rcx 
+    jle .mapping
+
+    ; 从物理地址 0x60000(常规内存顶端) 开始, 搜索系统描述指针结构(RSDP)
+    mov rbx, 0x60000
+    mov rcx, "RSD PTR "                             ; 结构起始标记
+
+.searc:
+    cmp qword [rbx], rcx
+    je .finda 
+    add rbx, 16                                     ; 结构的标记位于 16 字节边界处, 也就是说可以以 16 字节为单位搜索
+    cmp rbx, 0xffff0                                ; 搜索上边界
+    jl .searc 
+    jmp .acpi_err                                   ; 未找到 RSDP, 报错停机
+
+.finda:
+    ; RSDT 和 XSDT 都指向 MADT, 但 RSDT 给出的是 32 位物理地址, 而 XDST 给出 64 位物理地址。
+    ; 只有 VCPI 2.0 及更高版本才有 XSDT。典型地, VBox 支持 ACPI 2.0 而 Bochs 仅支持 1.0
+    ; 这个可以看书中 274 往后的几个图
+    cmp byte [rbx + 15], 2                          ; 检测 ACPI 的版本是否为 2
+    jne .acpi_1
+    mov rbx, [rbx + 24]                             ; 得到扩展的系统描述表 XSDT 的物理地址
+
+    ; 以下开始在 XSDT 中遍历搜索多 APIC 描述符表, 即 MADT
+    xor rdi, rdi                                    ; 下面要使用 rdi, 尽管 edi 赋值了, 但还是要清空 rdi
+    mov edi, [rbx + 4]                              ; 得到 XSDT 长度, 以字节计
+    add rdi, rbx                                    ; 计算上边界的物理地址
+    add rbx, 36                                     ; XSDT 尾部数组的物理地址
+.madt0:
+    mov r11, [rbx]             
+    cmp dword [r11], "APIC"                         ; MADT 表的标记
+    je .findm                       
+    add rbx, 8                                      ; 下一个元素
+    cmp rbx, rdi  
+    jl .madt0
+    jmp .acpi_err
+
+    ; 一些处理 VCPI 1.0, 在 RSDT 中遍历搜索 MADT
+.acpi_1:
+    mov ebx, [rbx + 16]                             ; 得到根系统描述符表 RSDT 的物理地址
+    mov edi, [ebx + 4]                              ; 得到 RSDT 的长度, 以字节计
+    add edi, ebx                                    ; 上边界物理地址
+    add ebx, 36                                     ; 尾部数组的物理地址
+    xor r11, r11 
+.madt1:
+    mov r11d, [ebx]
+    cmp dword [r11], "APIC"                         ; MADT 表的标记
+    je .findm
+    add ebx, 4
+    cmp ebx, edi 
+    jl .madt1
+    jmp .acpi_err
+
+.findm:
+    ; 此时, r11 是 MADT 的物理地址
+    mov edx, [r11 + 36]                             ; 预置的 Local APIC 物理地址
+    mov [rel lapic_addr], ebx
+
+    ; 以下开始遍历系统中的逻辑处理器的 LAPIC ID 和 I/O APIC
+    mov r15, [rel position]
+    lea r15, [r15 + cpu_list]
+
+    xor rdi, rdi 
+    mov edi, [r11 + 4]                              ; MADT 的长度
+    add rdi, r11                                    ; 上边界物理地址
+    add r11, 44                                     ; 指向 MADT 尾部中断控制器结构列表
+.enumd:
+    cmp byte [r11], 0                               ; 0 代表 Local APIC
+    je .l_apic
+    cmp byte [r11], 1                               ; 1 代表 I/O APIC
+    je .ioapic
+    jmp .m_end 
+.l_apic:
+    cmp dword [r11 + 4], 0                          ; Local APIC flag
+    jz .m_end
+    mov al [r11 + 3]                                ; 获取 Local APIC ID
+    mov [r15], al                                   ; 保存 Local APIC ID 到 cpu_list
+    inc r15
+    inc byte [rel num_cpus]                         ; 原来 cpu 数量是这么统计出来的
+    jmp .m_end
+.ioapic:
+    mov al, [r11 + 2]                               ; 取出 I/O APIC ID
+    mov [rel ioapic_id], al                         ; 保存 I/O APIC ID
+    mov eax, [r11 + 4]                              ; 取出 I/O APIC 物理地址
+    mov [rel ioapic_addr], eax                      ; 保存 I/O APIC ID 物理地址
+.m_end:
+    xor rax, rax 
+    mov al, [r11 + 1]
+    add r11, rax                                    ; 计算出下一个中断控制结构列表的物理地址
+    cmp r11, rdi 
+    jl .enumd
+
+    ; 遍历完成, 映射物理地址到内核指定区域
+
+    ; Local APIC -> LAPIC_START_ADDR
+    mov r13, LAPIC_START_ADDR
+    xor rax, rax 
+    mov eax, [rel lapic_addr]                       ; 取出 LAPIC 的物理地址
+    or eax, 0x1f                                    ; 设置属性, PCD=PWT=U/S=R/W=P=1, 强不可缓存
+    call mapping_laddr_to_page
+    ; I/O APIC -> IOAPIC_START_ADDR
+    mov r13, IOAPIC_START_ADDR
+    xor rax, rax 
+    mov eax, [rel ioapic_addr]
+    or eax, 0x1f  
+    call mapping_laddr_to_page
+
+    ; 以下测量当前处理器 1ms 内经历了多少时钟周期, 作为后续的定时基准, 详情见书中284 页
+    mov rsi, LAPIC_START_ADDR
+
+    mov dword [rsi + 0x320], 0x10000                ; 定时器的本地向量表入口寄存器, 单次击发模式
+    mov dword [rsi + 0x3e0], 0x0b                   ; 定时器的分频配置寄存器: 1 分频
+
+    mov al, 0x0b                                    ; RTC 寄存器 B                                     
+    or al, 0x80                                     ; 阻断 NMI
+    out 0x70, al            
+    mov al, 0x52                                    ; 设置寄存器 B, 开发周期性中断, 开放更新结束后中断, BCD 码, 24 小时制
+    out 0x71, al 
+
+    mov al, 0x8a                                    ; CMOS 寄存器 A
+    out 0x70, al 
+    mov al, 0x2d                                    ; 32 kHz, 125 ms 的周期性中断
+    out 0x71, al                                    ; 写回 CMOS 寄存器 A
+
+    mov al, 0x8c
+    out 0x70, al 
+    in al, 0x71                                     ; 读寄存器 C
+.w0:
+    in al, 0x71 
+    bt rax, 6                                       ; 更新周期结束中断已发生
+    jnc .w0 
+    mov dword [rsi + 0x380], 0xffff_ffff            ; 定时器初始计数寄存器: 置初始值并开始计数
+.w1:
+    in al, 0x71     
+    bt rax, 6   
+    jnc .w1 
+    mov edx, [rsi + 0x390],                         ; 定时器初始计数寄存器: 读当前计数值
+
+    mov eax, 0xffff_ffff
+    sub eax, edx 
+    xor edx, edx 
+    mov ebx, 125                                    ; 125ms
+    div ebx                                         ; 结果存在 eax 中, 即当前处理器在 1ms 内的时钟数
+
+    mov [rel clocks_1ms], eax                       ; 记录
+
     mov al, 0x0b                                    ; RTC 寄存器 B
     or al, 0x80                                     ; 阻断 NMI
     out 0x70, al 
+    mov al, 0x12                                    ; 设置寄存器 B, 只允许更新周期结束中断
+    out 0x71, al 
 
-    mov al, 0x12                                    ; 设置寄存器B，禁止周期性中断，开放更新结束后中断，BCD码，24小时制
+    ; 安装用于任务切换的中断处理过程
+    mov r9, [rel position]
+    lea rax, [r9 + rtm_interrupt_handle]            ; 得到 rtm_interrupt_handle 的线性地址
+    call make_interrupt_gate                        
+
+    cli 
+
+    mov r8, 0x28                                    ; 任务切换使用的中断向量
+    call mount_idt_entry
+
+    ; 设置和时钟中断相关的硬件
+    mov al, 0x0b                                    ; RTC 寄存器 B
+    or al, 0x80                                     ; 阻断 NMI
+    out 0x70, al 
+    mov al, 0x12                                    ; 设置寄存器 B, 禁止周期性中断, 开放更新结束后中断, BCD 码, 24 小时制
     out 0x71, al 
 
     in al, 0xa1                                     ; 读 8259 从片的 IMR 寄存器
-    and al, 0xfe                                    ; 清除 bit 0(此位连接RTC)
-    out 0xa1, al                                    ; 写回此寄存器
+    and al, 0xfe                                    ; 清除 bit 0, 此位连接 RTC 
+    out 0xa1, al                                    ; 写回寄存器
 
     sti 
 
     mov al, 0x0c 
-    out 0x70, al    
+    out 0x70, al 
     in al, 0x71                                     ; 读 RTC 寄存器 C, 复位未决的中断状态
+
+    ; 计算机启动后，默认使用经由 LINT0 的虚拟线模式。
+    ; LVT LINT0 寄存器的默认值：0x700，不屏蔽 LINT0，ExtINT 投递模式
+    ; LVT LINT1 寄存器的默认值：0x400，不屏蔽 LINT1，NMI 投递模式
+    ; 如果不使用 8259A PIC，直接使用 I/O APIC，则应当屏蔽 LVT LINT0 或者 8259A PIC 的输入。
+
+    mov al, 0xff                                    ; 屏蔽所有发往 8259A 主芯片的中断信号
+    out 0x21, al                                    ; 多处理器环境下不再使用 8259 芯片
+
+    mov eax, [rel clocks_1ms]                       ; 使用 Local APIC 内部的定时器, 更加灵活
+    mov ebx, 55             
+    mul ebx                                         ; 55ms 内经历的时钟周期数为单位
+    mov rsi LAPIC_START_ADDR                        ; Local APIC 的线性地址
+    mov dword [rsi + 0x3e0], 0x0b                   ; 1 分频
+    mov dword [rsi + 0x320], 0x20028                ; 周期性模式, 固定模式, 中断向量 0x28
+    mov dword [rsi + 0x380], eax                    ; 初始化计数值
 
     ; 以下创建进程
     mov r8, 50

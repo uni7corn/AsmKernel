@@ -110,30 +110,28 @@ start:
     push brand_mag
     call put_string_by_bios
 
-    ; 第五章再回来填坑----
 .no_brand:
-    ; 获取当前系统的物理内存布局信息(使用 int 0x15, E820 功能。俗称 E820 内存)
+    ; 获取当前系统的物理内存布局信息(使用 int 0x15, E820 功能。俗称 E820 内存), 详情见书中 268 页
     push es 
 
     mov bx, SDA_PHY_ADDR >> 4               ; 切换到系统数据区
     mov es, bx 
-    mov word [es:0x16], 0
+    mov word [es:0x16], 0                   ; 将地址描述结构的数量初始化为 0
     xor ebx, ebx                            ; 首次调用 int 0x15 时必须为 0
     mov di, 0x18                            ; 系统数据区内的偏移
 
 .mlookup:
     mov eax, 0xe820
-    mov ecx, 32
+    mov ecx, 32                             ; 地址描述结构的长度
     mov edx, "PAMS"
     int 0x15
-    add di, 32
+    add di, cx                              ; 写入 rs:di 中, 增加 di 偏移
     inc word [es:0x16]
-    or ebx, ebx
+    or ebx, ebx                             ; 若 ebx 为 0, 意味着是最后一个地址数据
     jnz .mlookup
 
     pop es
 
-    ; 第五章再回来填坑----
     ; 获取存储处理器的物理/虚拟地址尺寸信息
     mov eax, 0x80000000                     
     cpuid
