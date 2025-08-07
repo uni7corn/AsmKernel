@@ -88,13 +88,17 @@ rtm_interrupt_handle:
     push rax 
     push rbx 
 
-    mov al, 0x20                                    ; 中断结束命令 EOI
-    out 0xa0, al                                    ; 向从片发送
-    out 0x20, al                                    ; 向主片发送
+    ; mov al, 0x20                                    ; 中断结束命令 EOI
+    ; out 0xa0, al                                    ; 向从片发送
+    ; out 0x20, al                                    ; 向主片发送
 
     mov al, 0x0c                                    ; 寄存器 c 的索引, 且开放 NMI
     out 0x70, al
     in al, 0x71                                     ; 读一下 RTC 的寄存器C, 否则只发生一次中断, 此处不考虑闹钟和周期性中断的情况
+
+    ; 除非是 NMI、SMI、INIT、ExtINT、SIPI 或者 INIT-Deassert 引发的中断, 否则中断处理过程必须包含一条写 EOI 寄存器的指令
+    mov r8, LAPIC_START_ADDR                        ; 给 Local APIC 发送中断结束命令
+    mov dword [r8 + 0xb0], 0
 
     ; 以下开始执行任务切换
     ; 任务切换的原理是, 它发生在所有任务的全局空间。在任务 A 的全局空间执行任务切换，切换到任务 B, 实际上也是从任务 B 的全局空间返回任务B的私有空间。
@@ -637,7 +641,7 @@ init:
 .l_apic:
     cmp dword [r11 + 4], 0                          ; Local APIC flag
     jz .m_end
-    mov al [r11 + 3]                                ; 获取 Local APIC ID
+    mov al, [r11 + 3]                                ; 获取 Local APIC ID
     mov [r15], al                                   ; 保存 Local APIC ID 到 cpu_list
     inc r15
     inc byte [rel num_cpus]                         ; 原来 cpu 数量是这么统计出来的
@@ -752,7 +756,7 @@ init:
     mov eax, [rel clocks_1ms]                       ; 使用 Local APIC 内部的定时器, 更加灵活
     mov ebx, 55             
     mul ebx                                         ; 55ms 内经历的时钟周期数为单位
-    mov rsi LAPIC_START_ADDR                        ; Local APIC 的线性地址
+    mov rsi, LAPIC_START_ADDR                        ; Local APIC 的线性地址
     mov dword [rsi + 0x3e0], 0x0b                   ; 1 分频
     mov dword [rsi + 0x320], 0x20028                ; 周期性模式, 固定模式, 中断向量 0x28
     mov dword [rsi + 0x380], eax                    ; 初始化计数值
