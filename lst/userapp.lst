@@ -1,24 +1,28 @@
      1                                  ; 用户程序
      2                                  
      3                                  section app_header                              ; 应用程序头部
-     4 00000000 [4201000000000000]          length  dq app_end                          ; #0：用户程序的总长度（字节数）
-     5 00000008 [3601000000000000]          entry   dq start                            ; #8：用户程序入口点
+     4 00000000 [7701000000000000]          length  dq app_end                          ; #0：用户程序的总长度（字节数）
+     5 00000008 [6B01000000000000]          entry   dq start                            ; #8：用户程序入口点
      6 00000010 0000000000000000            linear  dq 0                                ; #16：用户程序加载的虚拟（线性）地址
      7                                  
      8                                  section app_data                                ; 应用程序数据段
      9 00000000 00<rep 80h>                 app_msg     times 128 db 0                  ; 应用程序消息缓冲区
-    10 00000080 50726F636573732049-         pid_prex    db "Process ID:", 0             ; 进程标识符前缀文本
-    10 00000089 443A00             
-    11 0000008C 00<rep 20h>                 pid         times 32 db 0                   ; 进程标识符的文本
-    12 000000AC 20646F696E6720312B-         delim       db " doing 1+2+3+...+", 0       ; 分隔文本
-    12 000000B5 322B332B2E2E2E2B00 
-    13 000000BE 00<rep 20h>                 addend      times 32 db 0                   ; 加数的文本
-    14 000000DE 3D00                        equal       db "=", 0                       ; 等于号
-    15 000000E0 00<rep 20h>                 cusum       times 32 db 0                   ; 相加结果的文本
+    10                                  
+    11 00000080 5461736B2000                pid_prex    db "Task ", 0                   ; 进程标识前缀文本
+    12 00000086 00<rep 20h>                 pid         times 32 db 0                   ; 进程标识的文本
+    13                                  
+    14 000000A6 206F6E204350552000          cpu_prex    db " on CPU ", 0                ; 处理器标识的前缀文本
+    15 000000AF 00<rep 20h>                 pcpu        times 32 db 0                   ; 处理器标识的文本
     16                                  
-    17                                  section app_code                                ; 应用程序代码段
-    18                                  
-    19                                  %include "./common/user_static64.asm"
+    17 000000CF 20646F20312B322B33-         delim       db " do 1+2+3+...+", 0          ; 分隔文本
+    17 000000D8 2B2E2E2E2B00       
+    18 000000DE 00<rep 20h>                 addend      times 32 db 0                   ; 加数的文本
+    19 000000FE 3D00                        equal       db "=", 0                       ; 等于号
+    20 00000100 00<rep 20h>                 cusum       times 32 db 0                   ; 相加结果的文本
+    21                                  
+    22                                  section app_code                                ; 应用程序代码段
+    23                                  
+    24                                  %include "./common/user_static64.asm"
      1                              <1> ; 用户通用代码
      2                              <1> 
      3                              <1>     bits 64 
@@ -105,70 +109,93 @@
     84 00000067 58                  <1>     pop rax 
     85                              <1> 
     86 00000068 C3                  <1>     ret 
-    20                                  
-    21                                      bits 64
-    22                                  
-    23                                  main:
-    24 00000069 B800000000                  mov rax, 0                                  ; 确定当前程序可以使用的显示行, dh=行号
-    25 0000006E 0F05                        syscall  
-    26                                  
-    27 00000070 B200                        mov dl, 0
-    28 00000072 41B10F                      mov r9b, 0x0f
-    29                                  
-    30 00000075 4C8B25(10000000)            mov r12, [rel linear]                       ; 当前程序加载的起始线性地址
-    31 0000007C B804000000                  mov rax, 4                                  ; 获取当前进程标识
-    32 00000081 0F05                        syscall 
-    33 00000083 4989C0                      mov r8, rax 
-    34 00000086 498D9C24[8C000000]          lea rbx, [r12 + pid]
-    35 0000008E E86DFFFFFF                  call bin64_to_dec                           ; 将进程标识转为字符串
-    36                                  
-    37 00000093 41B800000000                mov r8, 0                                   ; r8 存放累加和
-    38 00000099 41BA01000000                mov r10, 1                                  ; r10 存放加数
-    39                                  
-    40                                  .cusum:
-    41 0000009F 4D01D0                      add r8, r10 
-    42 000000A2 498D9C24[E0000000]          lea rbx, [r12 + cusum]
-    43 000000AA E851FFFFFF                  call bin64_to_dec                           ; 本次相加的结果转为字符串
-    44 000000AF 4D87D0                      xchg r8, r10 
-    45 000000B2 498D9C24[BE000000]          lea rbx, [r12 + addend]
-    46 000000BA E841FFFFFF                  call bin64_to_dec                           ; 将本次加数转为字符串
-    47 000000BF 4D87D0                      xchg r8, r10 
-    48                                  
-    49 000000C2 498DBC24[00000000]          lea rdi, [r12 + app_msg]                    ; 清空缓冲区
-    50 000000CA C60700                      mov byte [rdi], 0
+    25                                  
+    26                                      bits 64
+    27                                  
+    28                                  main:
+    29 00000069 B800000000                  mov rax, 0                                  ; 确定当前程序可以使用的显示行, dh=行号
+    30 0000006E 0F05                        syscall  
+    31                                  
+    32 00000070 B200                        mov dl, 0
+    33 00000072 41B10F                      mov r9b, 0x0f
+    34                                  
+    35 00000075 4C8B25(10000000)            mov r12, [rel linear]                       ; 当前程序加载的起始线性地址
+    36 0000007C B804000000                  mov rax, 4                                  ; 获取当前进程标识
+    37 00000081 0F05                        syscall 
+    38 00000083 4989C0                      mov r8, rax 
+    39 00000086 498D9C24[86000000]          lea rbx, [r12 + pid]
+    40 0000008E E86DFFFFFF                  call bin64_to_dec                           ; 将进程标识转为字符串
+    41                                  
+    42 00000093 41B800000000                mov r8, 0                                   ; r8 存放累加和
+    43 00000099 41BA01000000                mov r10, 1                                  ; r10 存放加数
+    44                                  
+    45                                  .cusum:
+    46 0000009F 4D01D0                      add r8, r10 
+    47 000000A2 498D9C24[00010000]          lea rbx, [r12 + cusum]
+    48 000000AA E851FFFFFF                  call bin64_to_dec                           ; 本次相加的结果转为字符串
+    49                                  
+    50 000000AF 4D87D0                      xchg r8, r10 
     51                                  
-    52                                      ; 链接字符串, 填入 app_msg 中
-    53 000000CD 498DB424[80000000]          lea rsi, [r12 + pid_prex]
-    54 000000D5 E86EFFFFFF                  call string_concatenates 
-    55 000000DA 498DB424[8C000000]          lea rsi, [r12 + pid]
-    56 000000E2 E861FFFFFF                  call string_concatenates
-    57 000000E7 498DB424[AC000000]          lea rsi, [r12 + delim]
-    58 000000EF E854FFFFFF                  call string_concatenates
-    59 000000F4 498DB424[BE000000]          lea rsi, [r12 + addend]
-    60 000000FC E847FFFFFF                  call string_concatenates
-    61 00000101 498DB424[DE000000]          lea rsi, [r12 + equal]
-    62 00000109 E83AFFFFFF                  call string_concatenates
-    63 0000010E 498DB424[E0000000]          lea rsi, [r12 + cusum]
-    64 00000116 E82DFFFFFF                  call string_concatenates
+    52 000000B2 498D9C24[DE000000]          lea rbx, [r12 + addend]
+    53 000000BA E841FFFFFF                  call bin64_to_dec                           ; 将本次加数转为字符串
+    54                                  
+    55 000000BF 4D87D0                      xchg r8, r10 
+    56                                  
+    57 000000C2 B806000000                  mov rax, 6                                  ; 获取处理器编号
+    58 000000C7 0F05                        syscall
+    59                                  
+    60 000000C9 4150                        push r8 
+    61 000000CB 4989C0                      mov r8, rax 
+    62 000000CE 498D9C24[AF000000]          lea rbx, [r12 + pcpu]
+    63 000000D6 E825FFFFFF                  call bin64_to_dec
+    64 000000DB 4158                        pop r8 
     65                                  
-    66 0000011B 4889FB                      mov rbx, rdi                                ; 显示字符串
-    67 0000011E B802000000                  mov rax, 2  
-    68 00000123 0F05                        syscall
-    69                                  
-    70 00000125 49FFC2                      inc r10 
-    71 00000128 4981FAA0860100              cmp r10, 100000
-    72 0000012F 0F8E6AFFFFFF                jle .cusum
-    73                                  
-    74 00000135 C3                          ret 
+    66 000000DD 498DBC24[00000000]          lea rdi, [r12 + app_msg]                    ; 清空缓冲区
+    67 000000E5 C60700                      mov byte [rdi], 0
+    68                                  
+    69                                      ; 链接字符串, 填入 app_msg 中
+    70 000000E8 498DB424[80000000]          lea rsi, [r12 + pid_prex]
+    71 000000F0 E853FFFFFF                  call string_concatenates 
+    72                                  
+    73 000000F5 498DB424[86000000]          lea rsi, [r12 + pid]
+    74 000000FD E846FFFFFF                  call string_concatenates
     75                                  
-    76                                  start:
-    77                                      ; 初始化代码...
+    76 00000102 498DB424[A6000000]          lea rsi, [r12 + cpu_prex]
+    77 0000010A E839FFFFFF                  call string_concatenates
     78                                  
-    79 00000136 E82EFFFFFF                  call main
-    80                                  
-    81                                      ; 清理, 收尾代码
-    82                                  
-    83 0000013B B805000000                  mov rax, 5                                  ; 终止任务
-    84 00000140 0F05                        syscall
-    85                                  
-    86                                  app_end:
+    79 0000010F 498DB424[AF000000]          lea rsi, [r12 + pcpu]
+    80 00000117 E82CFFFFFF                  call string_concatenates
+    81                                  
+    82 0000011C 498DB424[CF000000]          lea rsi, [r12 + delim]
+    83 00000124 E81FFFFFFF                  call string_concatenates
+    84                                  
+    85 00000129 498DB424[DE000000]          lea rsi, [r12 + addend]
+    86 00000131 E812FFFFFF                  call string_concatenates
+    87                                  
+    88 00000136 498DB424[FE000000]          lea rsi, [r12 + equal]
+    89 0000013E E805FFFFFF                  call string_concatenates
+    90                                  
+    91 00000143 498DB424[00010000]          lea rsi, [r12 + cusum]
+    92 0000014B E8F8FEFFFF                  call string_concatenates
+    93                                  
+    94 00000150 4889FB                      mov rbx, rdi                                ; 显示字符串
+    95 00000153 B802000000                  mov rax, 2  
+    96 00000158 0F05                        syscall
+    97                                  
+    98 0000015A 49FFC2                      inc r10 
+    99 0000015D 4981FA80969800              cmp r10, 10000000
+   100 00000164 0F8E35FFFFFF                jle .cusum
+   101                                  
+   102 0000016A C3                          ret 
+   103                                  
+   104                                  start:
+   105                                      ; 初始化代码...
+   106                                  
+   107 0000016B E8F9FEFFFF                  call main
+   108                                  
+   109                                      ; 清理, 收尾代码
+   110                                  
+   111 00000170 B805000000                  mov rax, 5                                  ; 终止任务
+   112 00000175 0F05                        syscall
+   113                                  
+   114                                  app_end:

@@ -7,9 +7,14 @@ section app_header                              ; 应用程序头部
 
 section app_data                                ; 应用程序数据段
     app_msg     times 128 db 0                  ; 应用程序消息缓冲区
-    pid_prex    db "Process ID:", 0             ; 进程标识符前缀文本
-    pid         times 32 db 0                   ; 进程标识符的文本
-    delim       db " doing 1+2+3+...+", 0       ; 分隔文本
+
+    pid_prex    db "Task ", 0                   ; 进程标识前缀文本
+    pid         times 32 db 0                   ; 进程标识的文本
+
+    cpu_prex    db " on CPU ", 0                ; 处理器标识的前缀文本
+    pcpu        times 32 db 0                   ; 处理器标识的文本
+
+    delim       db " do 1+2+3+...+", 0          ; 分隔文本
     addend      times 32 db 0                   ; 加数的文本
     equal       db "=", 0                       ; 等于号
     cusum       times 32 db 0                   ; 相加结果的文本
@@ -41,10 +46,22 @@ main:
     add r8, r10 
     lea rbx, [r12 + cusum]
     call bin64_to_dec                           ; 本次相加的结果转为字符串
+
     xchg r8, r10 
+
     lea rbx, [r12 + addend]
     call bin64_to_dec                           ; 将本次加数转为字符串
+
     xchg r8, r10 
+
+    mov rax, 6                                  ; 获取处理器编号
+    syscall
+
+    push r8 
+    mov r8, rax 
+    lea rbx, [r12 + pcpu]
+    call bin64_to_dec
+    pop r8 
 
     lea rdi, [r12 + app_msg]                    ; 清空缓冲区
     mov byte [rdi], 0
@@ -52,14 +69,25 @@ main:
     ; 链接字符串, 填入 app_msg 中
     lea rsi, [r12 + pid_prex]
     call string_concatenates 
+
     lea rsi, [r12 + pid]
     call string_concatenates
+
+    lea rsi, [r12 + cpu_prex]
+    call string_concatenates
+
+    lea rsi, [r12 + pcpu]
+    call string_concatenates
+
     lea rsi, [r12 + delim]
     call string_concatenates
+
     lea rsi, [r12 + addend]
     call string_concatenates
+
     lea rsi, [r12 + equal]
     call string_concatenates
+
     lea rsi, [r12 + cusum]
     call string_concatenates
 
@@ -68,7 +96,7 @@ main:
     syscall
 
     inc r10 
-    cmp r10, 100000
+    cmp r10, 10000000
     jle .cusum
 
     ret 

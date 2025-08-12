@@ -49,7 +49,7 @@
             %%spin_lock:
                     cmp %2, 0           ; 看一眼锁现在是不是 0
                     je %%get_lock      	; 如果是 0，说明没人占，跳过去抢
-                    pause				; 不是 0，先喘口气（降低 CPU 占用）
+                    pause				; 不是 0，先喘口气（降低 CPU 占用）, 见书中 341 页
                     jmp %%spin_lock    	; 继续看
             %%get_lock:
                     mov %1, 1

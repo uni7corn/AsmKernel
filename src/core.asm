@@ -12,15 +12,19 @@ SECTION core_data                                   ; 内核数据段
 
     num_cpus    db 0                                ; 逻辑处理器数量
     cpu_list    times 256 db 0                      ; Local APIC ID的列表
-    lapic_addr  dd 0                                ; Local APIC 的物理地址
+    lapic_addr  dd 0                                ; Local APIC的物理地址
 
-    ioapic_addr dd 0                                ; I/O APIC 的物理地址
+    ioapic_addr dd 0                                ; I/O APIC的物理地址
     ioapic_id   db 0                                ; I/O APIC ID
+
+    ack_cpus    db 0                                ; 处理器初始化应答计数
 
     clocks_1ms  dd 0                                ; 处理器在1ms内经历的时钟数
 
-    welcome     db "Executing in 64-bit mode.", 0x0d, 0x0a, 0
-    tss_ptr     dq 0                                ; 任务状态段TSS从此处开始
+    welcome     db "Executing in 64-bit mode.Init MP", 249, 0
+    cpu_init_ok db " CPU(s) ready.", 0x0d, 0x0a, 0
+
+    buffer      times 256 db 0
 
     sys_entry   dq get_screen_row
                 dq get_cmos_time
@@ -28,15 +32,111 @@ SECTION core_data                                   ; 内核数据段
                 dq create_process
                 dq get_current_pid
                 dq terminate_process
-
+                dq get_cpu_number
     pcb_ptr     dq 0                                ; 进程控制块PCB首节点的线性地址
-    cur_pcb     dq 0                                ; 当前任务的PCB线性地址 
+
 
 SECTION core_code                                   ; 内核代码段
 
 %include "./common/core_utils64.asm"
+%include "./common/user_static64.asm"
 
     [bits 64]
+
+
+_ap_string      db 249, 0
+
+; ------------------------------------------------------------
+; ap_to_core_entry
+; 功能: 应用处理器（AP）进入内核的入口点
+; ------------------------------------------------------------
+ap_to_core_entry:
+    ; 启用 GDT 的高端线性地址并加载 IDTR
+    mov rax, UPPER_SDA_LINEAR
+    lgdt [rax + 0]                                  ; 只有 64 位模式下才能加载 64 位线性地址
+    lidt [rax + 0x0c]
+
+    ; 为当前处理器创建 64 位 模式下专属栈
+    mov rcx, 4096
+    call core_memory_allocate
+    mov rsp, r14 
+
+    ; 创建当前处理器的专属存储区(格式见书中 348 页)
+    mov rcx, 256                                    ; 专属数据区长度, 含 TSS
+    call core_memory_allocate
+    lea rax, [r13 + 128]                            ; TSS 开始于专属存储区偏移为 128 的地方
+    call make_tss_descriptor
+
+    mov r15, UPPER_SDA_LINEAR
+
+    ; 安装 TSS 描述符到 GDT
+    mov r8, [r15 + 4]                               ; r8=gdt 的线性地址
+    movzx rcx, word [r15 + 2]                       ; rcx=gdt 的界限值
+    mov [r8 + rcx + 1], rsi                         ; TSS 描述符的低 64 位
+    mov [r8 + rcx + 9], rdi                         ; TSS 描述符的高 64 位
+
+    add word [r15 + 2], 16                          ; TSS 大小
+    lgdt [r15 + 2]                                  ; 重新加载 GDTR
+
+    shr cx, 3                                       ; 除 8 得到索引
+    inc cx                                          ; 找到 TSS 描述符
+    shl cx, 3                                       ; 乘 8 得到正确偏移
+
+    ltr cx                                          ; 为当前任务加载任务寄存器 TR
+
+    ; 将处理器专属数据区首地址保存到当前处理器的型号专属寄存器 IA32_KERNEL_GS_BASE
+    mov ecx, 0xc000_0102                            ; IA32_KERNEL_GS_BASE
+    mov rax, r13                                    ; 只用 EAX
+    mov rdx, r13 
+    shr rdx, 32 
+    wrmsr 
+
+    ; 为快速系统调用 SYSCALL 和 SYSRET 准备参数
+    mov ecx, 0x0c0000080                            ; 指定型号专属寄存器 IA32_EFER
+    rdmsr 
+    bts eax, 0                                      ; 设置 SCE 位，允许 SYSCALL 指令
+    wrmsr
+
+    mov ecx, 0xc0000081                             ; STAR
+    mov edx, (RESVD_DESC_SEL << 16) | CORE_CODE64_SEL
+    wrmsr
+
+    mov ecx, 0xc0000082                             ; LSTAR
+    mov rax, [rel position]
+    lea rax, [rax + syscall_procedure]              ; 只用 EAX 部分
+    mov rdx, rax
+    shr rdx, 32                                     ; 使用 EDX 部分
+    wrmsr
+
+    mov ecx, 0xc0000084                             ; FMASK
+    xor edx, edx
+    mov eax, 0x00047700                             ; 要求 TF=IF=DF=AC=0, IOPL=00
+    wrmsr
+
+    mov r15, [rel position]
+    lea rbx, [r15 + _ap_string]
+    call put_string64
+
+    swapgs                                          ; 准备用 GS 操作当前处理器的专属数据, IA32_KERNEL_GS_BASE 与 GS 互换内容
+    mov qword [gs:8], 0                             ; PCB 的线性地址 = 0, 没有正在执行的任务
+    xor rax, rax 
+    mov al, byte [rel ack_cpus]
+    mov [gs:16], rax                                ; 设置处理器编号
+    mov [gs:24], rsp                                ; 保存当前处理器的固有栈指针
+    swapgs
+
+    inc byte [rel ack_cpus]                         ; 递增应答计数值
+
+    mov byte [AP_START_UP_ADDR + lock_var], 0       ; 释放自旋锁
+
+    mov rsi, LAPIC_START_ADDR                       ; Local APIC 的线性地址
+    bts dword [rsi + 0xf0], 8                       ; 设置 SVR 寄存器, 允许 LAPIC
+
+    sti                                             ; 开放中断
+
+.do_idle:
+    hlt 
+    jmp .do_idle
 
 ; ------------------------------------------------------------
 ; general_interrupt_handler
@@ -60,7 +160,183 @@ general_exception_handler:
     cli 
     hlt                                             ; 停机且不接受外部硬件中断
 
-exceptm         db "A exception raised, halt.", 0    ; 发生异常时的错误信息
+exceptm         db "A exception raised, halt.", 0   ; 发生异常时的错误信息
+
+; ------------------------------------------------------------
+; search_for_a_ready_task
+; 功能: 查找一个就绪的任务并将其置为忙, 本程序在中断处理过程内调用，默认中断是关闭状态。
+; 输出: r11=就绪任务的 PCB 线性地址
+; ------------------------------------------------------------
+search_for_a_ready_task:
+    push rax 
+    push rbx 
+    push rcx 
+
+    mov rcx, 1                                      ; rcx=任务的“忙”状态
+
+    swapgs 
+    mov rbx, [gs:8]                                 ; 取得当前任务的 PCB 线性地址
+    swapgs
+    mov r11, rbx 
+    cmp rbx, 0                                      ; 专属数据区存的 PCB 线性地址为 0, 也就是刚初始化
+    jne .again
+    mov rbx, [rel pcb_ptr]                          ; 那就从链表头部开始找
+    mov r11, rbx 
+.again:
+    mov r11, [r11 + 280]                            ; 取得下一个节点
+    xor rax, rax 
+    lock cmpxchg [r11 + 16], rcx                    ; 原子操作, 详情见 374 页
+    jz .return
+    cmp r11, rbx                                    ; 是否转一圈回到当前节点?
+    je .fmiss                                       ; 是, 未找到就绪任务
+    jmp .again
+
+.fmiss:
+    xor r11, r11 
+.return:
+    pop rcx 
+    pop rbx 
+    pop rax 
+    ret 
+
+; ------------------------------------------------------------
+; resume_execute_a_task
+; 功能: 恢复执行一个任务
+; 输入: r11=指定任务的 PCB 线性地址, 本程序在中断处理过程内调用，默认中断是关闭状态。
+; ------------------------------------------------------------
+resume_execute_a_task:
+    mov eax, [rel clocks_1ms]                       ; 以下计算新任务运行时间
+    mov ebx, [r11 + 240]                            ; 任务制定的时间片
+    mul ebx 
+
+    mov rsi, LAPIC_START_ADDR
+    mov qword [rsi + 0x3e0], 0x0b                   ; 1 分频
+    mov qword [rsi + 0x320], 0xfd                   ; 单次击发模式, Fixed, 中断信号 0xfd, 详情见书中 276 页
+
+    mov rbx, [r11 + 56]
+    mov cr3, rbx                                    ; 切换地址空间
+
+    swapgs
+    mov [gs:8], r11                                 ; 将新任务设置为当前任务
+    ; mov qword [r11 + 16], 1                         ; 置任务状态为忙, 在 lock cmpxchg [r11 + 16], rcx 中已经被设置
+    mov rbx, [r11 + 32]                             ; 取 PCB 中的 RSP0
+    mov [gs:128 + 4], rbx                           ; 置 TSS 中的 RSP0
+    swapgs
+
+    mov rcx, [r11 + 80]
+    mov rdx, [r11 + 88]
+    mov rdi, [r11 + 104]
+    mov rbp, [r11 + 112]
+    mov rsp, [r11 + 120]
+    mov r8, [r11 + 128]
+    mov r9, [r11 + 136]
+    mov r10, [r11 + 144]
+    mov r12, [r11 + 160]
+    mov r13, [r11 + 168]
+    mov r14, [r11 + 176]
+    mov r15, [r11 + 184]
+    push qword [r11 + 208]                          ; SS
+    push qword [r11 + 120]                          ; RSP
+    push qword [r11 + 232]                          ; RFLAGS
+    push qword [r11 + 200]                          ; CS
+    push qword [r11 + 192]                          ; RIP
+
+    mov dword [rsi + 0x380], eax                    ; 开始计时
+
+    mov rax, [r11 + 64]
+    mov rbx, [r11 + 72]
+    mov rsi, [r11 + 96]
+    mov r11, [r11 + 152]
+
+    iretq                                           ; 转入新任务的空间执行
+
+; ------------------------------------------------------------
+; time_slice_out_handler
+; 功能: 时间片到期中断的处理过程
+; ------------------------------------------------------------
+time_slice_out_handler:
+    push rax
+    push rbx 
+    push r11 
+
+    mov r11, LAPIC_START_ADDR                       ; 给 Local APIC 发送中断结束命令 EOI
+    mov dword [r11 + 0xb0], 0
+
+    call search_for_a_ready_task
+    or r11, r11 
+    jz .return                                      ; 未找到就绪任务
+
+    swapgs
+    mov rax, qword [gs:8]                           ; 当前任务的 PCB 线性地址
+    swapgs
+
+    ; 保存当前任务的状态以便将来恢复执行。
+    mov rbx, cr3                                    ; 保存原任务的分页系统
+    mov qword [rax + 56], rbx
+    ; mov [rax + 64], rax                            ; 不需设置，将来恢复执行时从栈中弹出
+    ; mov [rax + 72], rbx                            ; 不需设置，将来恢复执行时从栈中弹出
+    mov [rax + 80], rcx
+    mov [rax + 88], rdx
+    mov [rax + 96], rsi
+    mov [rax + 104], rdi
+    mov [rax + 112], rbp
+    mov [rax + 120], rsp
+    mov [rax + 128], r8
+    mov [rax + 136], r9
+    mov [rax + 144], r10
+    ;mov [rax + 152], r11                           ; 不需设置，将来恢复执行时从栈中弹出
+    mov [rax + 160], r12
+    mov [rax + 168], r13
+    mov [rax + 176], r14
+    mov [rax + 184], r15
+    mov rbx, [rel position]
+    lea rbx, [rbx + .return]                        ; 将来恢复执行时，是从中断返回
+    mov [rax + 192], rbx                            ; RIP域为中断返回点
+    mov [rax + 200], cs
+    mov [rax + 208], ss
+    pushfq
+    pop qword [rax + 232]
+
+    mov qword [rax + 16], 0                         ; 置任务状态为就绪
+
+    jmp resume_execute_a_task                       ; 恢复并执行新任务
+
+.return:
+    pop r11
+    pop rbx 
+    pop rax 
+    iretq
+
+; ------------------------------------------------------------
+; new_task_notify_handler
+; 功能: 新任务创建后，将广播新任务创建消息给所有处理器，所有处理器执行此中断服务例程。
+; ------------------------------------------------------------
+new_task_notify_handler:
+    push rsi 
+    push r11 
+
+    mov rsi, LAPIC_START_ADDR                       
+    mov dword [rsi + 0xb0], 0                       ; 发送 EOI
+
+    swapgs
+    cmp qword [gs:8], 0                             ; 当前处理器没有任务执行吗?
+    swapgs
+    jne .return 
+
+    call search_for_a_ready_task
+    or r11, r11 
+    jz .return                                      ; 未找到就绪任务
+
+    add rsp, 16,                                    ; 去掉前面压入的两个
+    mov qword [gs:24], rsp                          ; 保存固有栈当前指针, 以便将来返回, 在进入中断时 RIP → CS → RFLAGS → RSP → SS 按顺序入栈
+    swapgs
+
+    jmp resume_execute_a_task                       ; 执行新任务
+
+.return:
+    pop r11
+    pop rsi 
+    iretq 
 
 ; ------------------------------------------------------------
 ; general_8259ints_handler
@@ -78,128 +354,19 @@ general_8259ints_handler:
     iretq
 
 ; ------------------------------------------------------------
-; rtm_interrupt_handle
-; 功能: 实时时钟中断处理过程(任务切换)
-; ------------------------------------------------------------
-rtm_interrupt_handle:
-    ; 进入中断时, 硬件自动关闭可屏蔽中断, iret 指令自动恢复中断发生前的 IF 状态，无需软件手动设置
-
-    push r8 
-    push rax 
-    push rbx 
-
-    ; mov al, 0x20                                    ; 中断结束命令 EOI
-    ; out 0xa0, al                                    ; 向从片发送
-    ; out 0x20, al                                    ; 向主片发送
-
-    mov al, 0x0c                                    ; 寄存器 c 的索引, 且开放 NMI
-    out 0x70, al
-    in al, 0x71                                     ; 读一下 RTC 的寄存器C, 否则只发生一次中断, 此处不考虑闹钟和周期性中断的情况
-
-    ; 除非是 NMI、SMI、INIT、ExtINT、SIPI 或者 INIT-Deassert 引发的中断, 否则中断处理过程必须包含一条写 EOI 寄存器的指令
-    mov r8, LAPIC_START_ADDR                        ; 给 Local APIC 发送中断结束命令
-    mov dword [r8 + 0xb0], 0
-
-    ; 以下开始执行任务切换
-    ; 任务切换的原理是, 它发生在所有任务的全局空间。在任务 A 的全局空间执行任务切换，切换到任务 B, 实际上也是从任务 B 的全局空间返回任务B的私有空间。
-
-    ; 从 PCB 链表中寻找就绪任务
-    mov r8, [rel cur_pcb]                           ; 定位当前任务的 PCB 节点
-.again:
-    mov r8, [r8 + 280]                              ; 获取下一个节点
-    cmp r8, [rel cur_pcb]                           ; 是否转一圈回到当前节点?
-    jz .return                                      ; 返回
- 
-    cmp qword [r8 + 16], 0                          ; 是否是就绪任务?
-    jz .found                                       ; 切换任务
-    jmp .again  
-
-.found:
-    mov rax, [rel cur_pcb]                          ; 取得当前任务的 PCB 的线性地址
-    cmp qword [rax + 16], 2                         ; 当前任务可能已经被标记为终止, 我们就不用保存当前任务状态
-    jz .restore
-
-    ; 保存当前任务的状态以便将来恢复执行
-    mov qword [rax + 16], 0                         ; 置任务状态为就绪
-    ; mov [rax + 64], rax                           ; 不需设置，将来恢复执行时从栈中弹出, 因为下面把当前任务的 rip 设置成了 .return, 也就是, 当这个任务在被切换到时, 会从 .return 开始执行, pop rax ...
-    ; mov [rax + 72], rbx                           ; 不需设置，将来恢复执行时从栈中弹出
-    mov [rax + 80], rcx
-    mov [rax + 88], rdx
-    mov [rax + 96], rsi
-    mov [rax + 104], rdi
-    mov [rax + 112], rbp
-    mov [rax + 120], rsp
-    ; mov [rax + 128], r8                           ; 不需设置，将来恢复执行时从栈中弹出
-    mov [rax + 136], r9
-    mov [rax + 144], r10
-    mov [rax + 152], r11
-    mov [rax + 160], r12
-    mov [rax + 168], r13
-    mov [rax + 176], r14
-    mov [rax + 184], r15
-    mov rbx, [rel position]
-    lea rbx, [rbx + .return]
-    mov [rax + 192], rbx                            ; RIP 为中断返回点
-    mov [rax + 200], cs
-    mov [rax + 208], ss
-    pushfq
-    pop qword [rax + 232]
-
-.restore:
-    ; 恢复新任务的状态
-    mov [rel cur_pcb], r8                           ; 将当前任务设置为新任务
-    mov qword [r8 + 16], 1                          ; 置任务状态为忙
-
-    mov rax, [r8 + 32]                              ; 取 PCB 中的 RSP0
-    mov rbx, [rel tss_ptr]
-    mov [rbx + 4], rax                              ; 置 TSS 的 RSP0
-
-    mov rax, [r8 + 56]                              ; 设置 cr3, 切换地址空间
-    mov cr3, rax 
-
-    mov rax, [r8 + 64]
-    mov rbx, [r8 + 72]
-    mov rcx, [r8 + 80]
-    mov rdx, [r8 + 88]
-    mov rsi, [r8 + 96]
-    mov rdi, [r8 + 104]
-    mov rbp, [r8 + 112]
-    mov rsp, [r8 + 120]
-    mov r9, [r8 + 136]
-    mov r10, [r8 + 144]
-    mov r11, [r8 + 152]
-    mov r12, [r8 + 160]
-    mov r13, [r8 + 168]
-    mov r14, [r8 + 176]
-    mov r15, [r8 + 184]
-
-    push qword [r8 + 208]                           ; SS
-    push qword [r8 + 120]                           ; RSP
-    push qword [r8 + 232]                           ; RFLAGS
-    push qword [r8 + 200]                           ; CS
-    push qword [r8 + 192]                           ; RIP
-
-    mov r8, [r8 + 128]                              ; 恢复 R8 的值
-
-    iretq                                           ; 转入新任务局部空间执行
-
-.return:
-    pop rbx 
-    pop rax 
-    pop r8 
-
-    iretq
-
-; ------------------------------------------------------------
 ; append_to_pcb_link
 ; 功能: 在 PCB 链上追加任务控制块
 ; 输入: r11=PCB 线性基地址
 ; ------------------------------------------------------------
+_append_lock dq 0
+
 append_to_pcb_link:
     push rax 
     push rbx 
 
+    pushfq
     cli 
+    SET_SPIN_LOCK rax, qword [rel _append_lock]
 
     mov rbx, [rel pcb_ptr]                          ; 取得链表首节点的线性地址
     or rbx, rbx 
@@ -218,7 +385,8 @@ append_to_pcb_link:
     mov [rbx], r11                                  ; 头节点的前驱是追加节点
 
 .return:
-    sti 
+    mov qword [rel _append_lock], 0
+    popfq
 
     pop rbx 
     pop rax 
@@ -231,8 +399,13 @@ append_to_pcb_link:
 ; 输出: rax=当前任务（进程）的标识
 ; ------------------------------------------------------------
 get_current_pid:
-    mov rax, [rel cur_pcb]
+    pushfq
+    cli 
+    swapgs
+    mov rax, [gs:8]
     mov rax, [rax + 8]
+    swapgs
+    popfq
 
     ret 
 
@@ -241,12 +414,26 @@ get_current_pid:
 ; 功能: 终止当前任务
 ; ------------------------------------------------------------
 terminate_process:
+    mov rsi, LAPIC_START_ADDR
+    mov dword [rsi + 0x320], 0x00010000             ; 屏蔽定时器中断
+
     cli                                             ; 执行流改变期间禁止时钟中断引发的任务切换
 
-    mov rax, [rel cur_pcb]                          ; 定位到当前任务的 PCB 节点
-    mov qword [rax + 16], 2                         ; 状态=终止
-    
-    jmp rtm_interrupt_handle                        ; 执行任务调度, 将控制权交给处理器
+    swapgs
+    mov rax, [gs:8]                                 ; PCB 线性地址
+    mov qword [rax + 16], 2                         ; 任务状态=终止
+    mov qword [gs:0], 0
+    mov rsp, [gs:24]                                ; 切换到处理器固有栈
+    swapgs
+
+    call search_for_a_ready_task
+    or r11, r11 
+    jz .sleep                                       ; 未找到就绪任务
+
+    jmp resume_execute_a_task                       ; 执行新任务
+
+.sleep:
+    iretq
 
 ; ------------------------------------------------------------
 ; create_process
@@ -347,12 +534,18 @@ create_process:
     pushfq
     pop qword [r11 + 232]                           ; 填写 PCB 中 RFLAGS
 
+    mov qword [r11 + 240], SUGG_PREEM_SLICE         ; 推荐的执行时间片
+
     call generate_process_id
     mov [r11 + 8], rax                              ; 填入 PCB 中当前任务标识
 
     call append_to_pcb_link                         ; 将 PCB 添加到进程控制链表尾部
 
     mov cr3, r15                                    ; 切换到原任务地址空间
+
+    mov rsi, LAPIC_START_ADDR                       ; Local APIC 的线性地址
+    mov dword [rsi + 0x310], 0
+    mov dword [rsi + 0x300], 0x000840fe             ; 向所有处理器发送任务认领中断
 
     pop r15
     pop r14
@@ -373,22 +566,26 @@ create_process:
     ret
 ; ------------------------------------------------------------
 ; syscall_procedure
-; 功能: 系统调用的处理过程
+; 功能: 系统调用的处理过程, 处理器会自动关闭可屏蔽中断
 ; 注意: rcx 和 r11 由处理器使用, 保存 rip 和 rflags 的内容; rbp 和 r15 由此例程占用. 如有必要, 请用户程序在调用 syscall 前保存它们, 在系统调用返回后自行恢复.
 ; ------------------------------------------------------------
 syscall_procedure: 
-    mov rbp, rsp 
-    mov r15, [rel tss_ptr]
-    mov rsp, [r15 + 4]                              ; 使用 TSS 的 RSP0 作为安全栈
 
-    sti                                             ; 恢复中断
+    swapgs
+    mov [gs:0], rsp                                 ; 保存当前 3 特权级栈指针
+    mov rsp, [gs:128 + 4],                          ; 使用 TSS 的 RSP0 作为安全栈
+    push qword [gs:0]                               
+    swapgs
+    sti                                             ; 准备工作全部完成，中断和任务切换无虞
 
+    push r15 
     mov r15, [rel position]
-    add r15, [r15 + rax * 8 + sys_entry]
+    add r15, [r15 + rax * 8 + sys_entry]            ; 得到指定的那个系统调用功能的线性地址
     call r15
+    pop r15 
 
-    cli                                             ; 关中断, 恢复栈
-    mov rsp, rbp 
+    cli 
+    pop rsp                                         ; 恢复原先的 3 特权级栈指针
     o64 sysret
 
 ; ------------------------------------------------------------
@@ -445,23 +642,11 @@ init:
     mov rbx, UPPER_SDA_LINEAR                       ; 系统数据区 SDA 的高端线性地址
     mov word [rbx + 0x0c], 256 * 16 - 1
     mov qword [rbx + 0x0e], rax                     ; 将 IDT 的线性地址和界限写入内核空间保存
-    
 
     lidt [rbx + 0x0c]                               ; 加载 IDT
 
-    call init_8259                                  ; 初始化 8259 中断控制器，包括重新设置中断向量号
-
-    lea rax, [r9 + general_8259ints_handler]        ; 得到通用 8259 中断处理过程的线性地址
-    call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
-
-    mov r8, 0x20
-.8259:
-    call mount_idt_entry                            ; 在 core_utils64.asm 中实现
-    inc r8
-    cmp r8, 0x2f                                    ; 8259 用来收集外部硬件中断信号, 提供 16 个中断向量, 将之前的覆盖
-    jle .8259
-
-    sti                                             ; 开放硬件中断
+    mov al, 0xff                                    ; 屏蔽所有发往 8259A 主芯片的中断信号
+    out 0x21, al                                    ; 多处理器下不再使用 8259 芯片
 
     ; 在 64 位模式下显示的第一条信息!
     mov r15, [rel position]
@@ -469,12 +654,12 @@ init:
     call put_string64                               ; 在 core_utils64.asm 中实现
 
     ; 安装系统服务(syscall, sysret)所需的代码段和栈段描述符
-    sub rsp, 16                                     ; 开辟 16 字节空间操作 GDT, GDTR
-    sgdt [rsp]
+    mov r15, UPPER_SDA_LINEAR                       ; 系统数据区 SDA 的线性地址
     xor rbx, rbx 
-    mov bx, [rsp]                                   ; 得到 GDT 界限值(表的总字节数 - 1 == 下标)
-    inc bx
-    add rbx, [rsp + 2]                              ; GDT 基址 + GDT 界限值 + 1 == 新描述符的地址
+    mov bx, [r15 + 2]                               ; 得到 GDT 界限值(表的总字节数 - 1 == 下标)
+    inc bx 
+    add rbx, [r15 + 4]                              ; GDT 基址 + GDT 界限值 + 1 == 新描述符的地址
+                        
     ; 增加新的描述符, 这里可以看书中 182 页的图, 将之前设置的四个描述符也画全了
 
     ; 创建 4# 描述符, 栈/数据段描述符, DPL= 0
@@ -490,21 +675,31 @@ init:
     mov dword [rbx + 24], 0x0000ffff
     mov dword [rbx + 28], 0x00aff800
 
-    ; 安装任务状态段 TSS 的描述符, 见书中 200 页
-    mov rcx, 104                                    ; TSS 标准长度
+    ; 我们为每个逻辑处理器都准备一个专属数据区, 它是由每个处理器的 GS 所指向的。
+    ; 为当前处理器(BSP)准备专属数据区, 设置 GS 并安装任务状态段 TSS 的描述符
+    ; 详情见书中 348 页
+    mov rcx, 256                                    ; 专属数据区长度
     call core_memory_allocate                       ; 在 core_utils64.asm 中实现
-    mov [rel tss_ptr], r13 
-    mov rax, r13 
-    call make_tss_descriptor                        ; 在 core_utils64.asm 中实现
-    mov qword [rbx + 32], rsi                       ; TSS 描述符低 64 位
-    mov qword [rbx + 40], rdi                       ; TSS 描述符高 64 位
+    mov qword [r13 + 8], 0                          ; 当前任务的 PCB 指针, 初始化为 0
+    mov qword [r13 + 16], 0                         ; 将当前的处理器编号设置为 #0
+    mov [r13 + 24], rsp                             ; 当前处理器的专属栈
+    lea rax, [r13 + 128]                            ; TSS 开始于专属数据区内偏移为 128 的地方
+    call make_tss_descriptor
+    mov qword [rbx + 32], rsi                       ; TSS 描述符的低 64 位
+    mov qword [rbx + 40], rdi                       ; TSS 描述符的高 64 位
 
-    add word [rsp], 48                              ; 四个段描述符和一个 TSS 描述符总字节数
-    lgdt [rsp]
-    add rsp, 16                                     ; 栈平衡
+    add word [r15 + 2], 48                          ; 更新 GDT 的边界值, 48 是四个段描述符和一个 TSS 描述符的字节数
+    lgdt [r15 + 2]
 
     mov cx, 0x0040                                  ; TSS 描述符选择子
     ltr cx                                          ; 使用 ltr 指令加载 TSS 选择子
+
+    ; 将处理器专属数据区首地址保存到当前处理器的型号专属寄存器 IA32_KERNEL_GS_BASE
+    mov ecx, 0xc000_0102                            ; IA32_KERNEL_GS_BASE
+    mov rax, r13                                    ; 只用 eax
+    mov rdx, r13 
+    shr rdx, 32                                     ; 只用 edx
+    wrmsr
 
     ; 为快速系统调用 syscall 和 sysret 准备参数, 详细见书中 180-185
     mov ecx, 0x0c0000080                            ; 指定型号专属寄存器 IA32_EFER
@@ -720,68 +915,132 @@ init:
 
     ; 安装用于任务切换的中断处理过程
     mov r9, [rel position]
-    lea rax, [r9 + rtm_interrupt_handle]            ; 得到 rtm_interrupt_handle 的线性地址
+    lea rax, [r9 + new_task_notify_handler]         ; 得到中断处理过程的线性地址
     call make_interrupt_gate                        
 
     cli 
-
-    mov r8, 0x28                                    ; 任务切换使用的中断向量
+    mov r8, 0xfe                                    ; 任务切换使用的中断向量, 数越大, 优先级越高
     call mount_idt_entry
-
-    ; 设置和时钟中断相关的硬件
-    mov al, 0x0b                                    ; RTC 寄存器 B
-    or al, 0x80                                     ; 阻断 NMI
-    out 0x70, al 
-    mov al, 0x12                                    ; 设置寄存器 B, 禁止周期性中断, 开放更新结束后中断, BCD 码, 24 小时制
-    out 0x71, al 
-
-    in al, 0xa1                                     ; 读 8259 从片的 IMR 寄存器
-    and al, 0xfe                                    ; 清除 bit 0, 此位连接 RTC 
-    out 0xa1, al                                    ; 写回寄存器
-
     sti 
 
-    mov al, 0x0c 
-    out 0x70, al 
-    in al, 0x71                                     ; 读 RTC 寄存器 C, 复位未决的中断状态
+    ; 以下安装时间片到期中断处理过程
+    mov r9, [rel position]
+    lea rax, [r9 + time_slice_out_handler]          ; 得到中断处理过程的线性地址
+    call make_interrupt_gate            
 
-    ; 计算机启动后，默认使用经由 LINT0 的虚拟线模式。
-    ; LVT LINT0 寄存器的默认值：0x700，不屏蔽 LINT0，ExtINT 投递模式
-    ; LVT LINT1 寄存器的默认值：0x400，不屏蔽 LINT1，NMI 投递模式
-    ; 如果不使用 8259A PIC，直接使用 I/O APIC，则应当屏蔽 LVT LINT0 或者 8259A PIC 的输入。
+    cli 
+    mov r8, 0xfd 
+    call mount_idt_entry
+    sti
 
-    mov al, 0xff                                    ; 屏蔽所有发往 8259A 主芯片的中断信号
-    out 0x21, al                                    ; 多处理器环境下不再使用 8259 芯片
+    ; 以下初始化应用处理器 AP, 先将初始化代码复制到物理内存的选定位置
+    mov rsi, [rel position]
+    lea rsi, [rsi + section.ap_init_block.start]    ; 源
+    mov rdi, AP_START_UP_ADDR                       ; 目的地
+    mov rcx, ap_init_tail - ap_init                 ; 次数
+    cld 
+    repe movsb 
 
-    mov eax, [rel clocks_1ms]                       ; 使用 Local APIC 内部的定时器, 更加灵活
-    mov ebx, 55             
-    mul ebx                                         ; 55ms 内经历的时钟周期数为单位
-    mov rsi, LAPIC_START_ADDR                        ; Local APIC 的线性地址
-    mov dword [rsi + 0x3e0], 0x0b                   ; 1 分频
-    mov dword [rsi + 0x320], 0x20028                ; 周期性模式, 固定模式, 中断向量 0x28
-    mov dword [rsi + 0x380], eax                    ; 初始化计数值
+    ; 所有处理器都应该在初始化期间递增应答计数值
+    inc byte [rel ack_cpus]                         ; BSP 自己的应答计数值
+
+    ; 给其它处理器发送 INIT IPI 和 SIPI, 命令他们初始化自己
+    mov rsi, LAPIC_START_ADDR
+    mov dword [rsi + 0x310], 0
+    mov dword [rsi + 0x300], 0x000c4500             ; 先发送 INIT IPI
+    mov dword [rsi + 0x300], (AP_START_UP_ADDR >> 12) | 0x000c4600      ; start up IPI
+    mov dword [rsi + 0x300], (AP_START_UP_ADDR >> 12) | 0x000c4600      ; 保险起见发两次
+
+    mov al, [rel num_cpus]
+
+.wcpus:
+    cmp al, [rel ack_cpus]
+    jne .wcpus                                      ; 等待所有应用处理器的应答
+
+    ; 显示已应答的处理器数量
+    mov r15, [rel position]
+
+    xor r8, r8 
+    mov r8b, [rel ack_cpus]
+    lea rbx, [r15 + buffer]
+    call bin64_to_dec
+    call put_string64
+
+    lea rbx, [r15 + cpu_init_ok]
+    call put_string64
 
     ; 以下创建进程
     mov r8, 50
     call create_process
 
-    mov rbx, [rel pcb_ptr]                          ; 得到外壳任务 PCB 的线性地址
-    mov rax, [rbx + 56]                             ; 从 PCB 中取出 CR3
-    mov cr3, rax                                    ; 切换到新进程的地址空间, cr3 寄存器中存储当前四级头表的地址
+    jmp ap_to_core_entry.do_idle                    ; 去处理器集结休息区
 
-    mov [rel cur_pcb], rbx                          ; 设置当前任务的 PCB
-    mov qword [rbx + 16], 1                         ; 设置当前任务状态为忙
+section ap_init_block vstart=0                      ; vstart 改变段内汇编地址, 让其都相对于段起始, 即这段代码是浮动的
 
-    mov rax, [rbx + 32]                             ; 从 PCB 中取出 RSP0
-    mov rdx, [rel tss_ptr]                          ; 得到 TSS 的线性地址
-    mov [rdx + 4], rax                              ; 在 TSS 中回填 RSP0
+    bits 16                                         ; 应用处理器 AP 从实模式开始
 
-    push qword [rbx + 208]                          ; 用户程序的 SS
-    push qword [rbx + 120]                          ; 用户程序的 RSP
-    pushfq                                          ; 用户程序的 RFLGAS
-    push qword [rbx + 200]                          ; 用户程序的 CS
-    push qword [rbx + 192]                          ; 用户程序的 RIP
+ap_init:
+    mov ax, AP_START_UP_ADDR >> 4
+    mov ds, ax 
 
-    iretq                                           ; 返回当前任务的私有空间执行, 弹出 rip, cs, rflags, rsp, ss 跳转
+    SET_SPIN_LOCK al, byte [lock_var]               ; 自旋知道获得锁
 
+    mov ax, SDA_PHY_ADDR >> 4                       ; 切换到系统数据区
+    mov ds, ax 
+
+    lgdt [2]                                        ; 加载描述符寄存器 GDTR, 实模式下只加载 6 字节的内容, 界限值 2 字节, 基地址 4 字节, 描述符已经填好
+
+    in al, 0x92                                     ; 南桥芯片内端口
+    or al, 0000_0010B
+    out 0x92, al                                    ; 打开 A20
+
+    cli                                             ; 中断机制尚未工作
+
+    mov eax, cr0
+    or eax, 1
+    mov cr0, eax                                    ; 设置 PE 位
+
+    ; 进入保护模式...
+    jmp 0x0008: AP_START_UP_ADDR + .flush           ; 0x0008 是保护模式下的代码段描述符的选择子, 清流水线并串行化处理器
+
+    [bits 32]
+.flush:
+    mov eax, 0x0010                                 ; 加载数据段(4gb)选择子
+    mov ss, eax                                     ; 加载堆栈段(4gb)选择子
+    mov esp, 0x7e00                                 ; 堆栈指针
+
+    ; 令 CR3 寄存器指向 4 级表头(保护模式下的 32 位 CR3)
+    mov eax, PML4_PHY_ADDR                          ; PCD = PWT = 0
+    mov cr3, eax 
+
+    ; 开启物理地址扩展 PAE
+    mov eax, cr4 
+    bts eax, 5
+    mov cr4, eax 
+
+    ; 设置型号专属寄存器 IA32_EFER.LME，允许 IA_32e 模式
+    mov ecx, 0x0c0000080                            ; 指定型号专属寄存器 IA32_EFER
+    rdmsr 
+    bts eax, 8                                      ; 设置 LME 位
+    wrmsr
+
+    ; 开启分页功能
+    mov eax, cr0 
+    bts eax, 31                                     ; 置位 CR0.PG
+    mov cr0, eax 
+
+    ; 进入 64 位模式
+    jmp CORE_CODE64_SEL:AP_START_UP_ADDR + .to64
+.to64:
+    bits 64
+
+    ; 转入内核中继续初始化, 使用高端线性地址
+    mov rbx, UPPER_CORE_LINEAR + ap_to_core_entry
+    jmp rbx 
+
+lock_var db 0
+
+ap_init_tail:
+
+section core_tail
 core_end:

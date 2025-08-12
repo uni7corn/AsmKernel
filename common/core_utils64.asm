@@ -883,3 +883,44 @@ get_screen_row:
 	lock xadd byte [rel _screen_row], dh 
 
 	ret 
+
+; ------------------------------------------------------------
+; get_cpu_number
+; 功能: 返回当前处理器的编号
+; 输出: rax=处理器编号
+; ------------------------------------------------------------
+get_cpu_number:
+	pushfq
+	cli 
+	swapgs
+	mov rax, [gs:16]							; 在专属数据区取
+	swapgs
+	popfq
+	ret 
+
+; ------------------------------------------------------------
+; memory_allocate
+; 功能: 用户空间的内存分配
+; 输入: rdx=期望分配的字节数
+; 输出: r13=所分配内存的起始线性地址
+; ------------------------------------------------------------
+memory_allocate:
+	push rcx 
+	push r11 
+	push r14 
+
+	pushfq
+	cli 
+	swapgs
+	mov r11, [gs:8]								; PCB 线性地址
+	swapgs
+	popfq
+
+	mov rcx, rdx 
+	call user_memory_allocate
+
+	pop r14 
+	pop r11 
+	pop rcx 
+
+	ret 
