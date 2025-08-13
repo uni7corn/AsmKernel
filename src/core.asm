@@ -43,17 +43,16 @@ SECTION core_code                                   ; 内核代码段
 
     [bits 64]
 
-
-_ap_string      db 249, 0
-
 ; ------------------------------------------------------------
 ; ap_to_core_entry
 ; 功能: 应用处理器（AP）进入内核的入口点
 ; ------------------------------------------------------------
+_ap_string      db 249, 0
+
 ap_to_core_entry:
     ; 启用 GDT 的高端线性地址并加载 IDTR
     mov rax, UPPER_SDA_LINEAR
-    lgdt [rax + 0]                                  ; 只有 64 位模式下才能加载 64 位线性地址
+    lgdt [rax + 2]                                  ; 只有 64 位模式下才能加载 64 位线性地址
     lidt [rax + 0x0c]
 
     ; 为当前处理器创建 64 位 模式下专属栈
@@ -99,6 +98,7 @@ ap_to_core_entry:
 
     mov ecx, 0xc0000081                             ; STAR
     mov edx, (RESVD_DESC_SEL << 16) | CORE_CODE64_SEL
+    xor eax, eax 
     wrmsr
 
     mov ecx, 0xc0000082                             ; LSTAR
@@ -210,8 +210,8 @@ resume_execute_a_task:
     mul ebx 
 
     mov rsi, LAPIC_START_ADDR
-    mov qword [rsi + 0x3e0], 0x0b                   ; 1 分频
-    mov qword [rsi + 0x320], 0xfd                   ; 单次击发模式, Fixed, 中断信号 0xfd, 详情见书中 276 页
+    mov dword [rsi + 0x3e0], 0x0b                   ; 1 分频
+    mov dword [rsi + 0x320], 0xfd                   ; 单次击发模式, Fixed, 中断信号 0xfd, 详情见书中 276 页
 
     mov rbx, [r11 + 56]
     mov cr3, rbx                                    ; 切换地址空间
@@ -327,6 +327,7 @@ new_task_notify_handler:
     or r11, r11 
     jz .return                                      ; 未找到就绪任务
 
+    swapgs
     add rsp, 16,                                    ; 去掉前面压入的两个
     mov qword [gs:24], rsp                          ; 保存固有栈当前指针, 以便将来返回, 在进入中断时 RIP → CS → RFLAGS → RSP → SS 按顺序入栈
     swapgs
@@ -335,23 +336,8 @@ new_task_notify_handler:
 
 .return:
     pop r11
-    pop rsi 
+    pop rsi
     iretq 
-
-; ------------------------------------------------------------
-; general_8259ints_handler
-; 功能: 通用的 8259 中断处理过程
-; ------------------------------------------------------------
-general_8259ints_handler:
-    push rax 
-
-    mov al, 0x20                                    ; 中断结束命令 EOI
-    out 0xa0, al                                    ; 向从片发送
-    out 0x20, al                                    ; 向主片发送
-
-    pop rax 
-
-    iretq
 
 ; ------------------------------------------------------------
 ; append_to_pcb_link
@@ -744,7 +730,7 @@ init:
 .acpi_err:
     mov r15, [rel position]
     lea rbx, [r15 + acpi_error]
-    call put_cstringxy64
+    call put_string64
     cli 
     hlt 
 
@@ -781,7 +767,7 @@ init:
     ; 只有 VCPI 2.0 及更高版本才有 XSDT。典型地, VBox 支持 ACPI 2.0 而 Bochs 仅支持 1.0
     ; 这个可以看书中 274 往后的几个图
     cmp byte [rbx + 15], 2                          ; 检测 ACPI 的版本是否为 2
-    jne .acpi_1
+    jne .vcpi_1
     mov rbx, [rbx + 24]                             ; 得到扩展的系统描述表 XSDT 的物理地址
 
     ; 以下开始在 XSDT 中遍历搜索多 APIC 描述符表, 即 MADT
@@ -798,8 +784,8 @@ init:
     jl .madt0
     jmp .acpi_err
 
-    ; 一些处理 VCPI 1.0, 在 RSDT 中遍历搜索 MADT
-.acpi_1:
+    ; 以下处理 VCPI 1.0, 在 RSDT 中遍历搜索 MADT
+.vcpi_1:
     mov ebx, [rbx + 16]                             ; 得到根系统描述符表 RSDT 的物理地址
     mov edi, [ebx + 4]                              ; 得到 RSDT 的长度, 以字节计
     add edi, ebx                                    ; 上边界物理地址
@@ -817,7 +803,7 @@ init:
 .findm:
     ; 此时, r11 是 MADT 的物理地址
     mov edx, [r11 + 36]                             ; 预置的 Local APIC 物理地址
-    mov [rel lapic_addr], ebx
+    mov [rel lapic_addr], edx
 
     ; 以下开始遍历系统中的逻辑处理器的 LAPIC ID 和 I/O APIC
     mov r15, [rel position]

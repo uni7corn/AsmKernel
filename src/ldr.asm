@@ -125,7 +125,7 @@ start:
     mov ecx, 32                             ; 地址描述结构的长度
     mov edx, "PAMS"
     int 0x15
-    add di, cx                              ; 写入 rs:di 中, 增加 di 偏移
+    add di, 32                              ; 写入 rs:di 中, 增加 di 偏移
     inc word [es:0x16]
     or ebx, ebx                             ; 若 ebx 为 0, 意味着是最后一个地址数据
     jnz .mlookup

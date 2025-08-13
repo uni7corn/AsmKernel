@@ -65,7 +65,7 @@
      4                                  
      5                                  SECTION core_header                                 ; 内核头部
      6 00000000 [00000000]                  length      dd core_end                         ; 内核总长度
-     7 00000004 [AC0F0000]                  init_entry  dd init                             ; 内核入口点
+     7 00000004 [A60F0000]                  init_entry  dd init                             ; 内核入口点
      8 00000008 0000000000000000            position    dq 0                                ; 内核加载虚拟地址
      9                                  
     10                                  SECTION core_data                                   ; 内核数据段
@@ -98,9 +98,9 @@
     29 00000269 [0609000000000000]          sys_entry   dq get_screen_row
     30 00000271 [8208000000000000]                      dq get_cmos_time
     31 00000279 [DE00000000000000]                      dq put_cstringxy64
-    32 00000281 [1E0E000000000000]                      dq create_process
-    33 00000289 [B40D000000000000]                      dq get_current_pid
-    34 00000291 [CB0D000000000000]                      dq terminate_process
+    32 00000281 [180E000000000000]                      dq create_process
+    33 00000289 [AE0D000000000000]                      dq get_current_pid
+    34 00000291 [C50D000000000000]                      dq terminate_process
     35 00000299 [1109000000000000]                      dq get_cpu_number
     36 000002A1 0000000000000000            pcb_ptr     dq 0                                ; 进程控制块PCB首节点的线性地址
     37                                  
@@ -324,7 +324,7 @@
    149                              <1> ; 输入: rbx=字符串首地址, dh=行, dl=列, r9b=颜色属性
    150                              <1> ; ------------------------------------------------------------
    151                              <1> %ifdef __MP__ 
-   152                              <1> _prnxy_locker dp 0
+   152                              <1> _prnxy_locker dq 0
    153                              <1> %endif 
    154                              <1> 
    155                              <1> put_cstringxy64:
@@ -1197,130 +1197,130 @@
     43                                  
     44                                      [bits 64]
     45                                  
-    46                                  
-    47 000009B2 F900                    _ap_string      db 249, 0
-    48                                  
+    46                                  ; ------------------------------------------------------------
+    47                                  ; ap_to_core_entry
+    48                                  ; 功能: 应用处理器（AP）进入内核的入口点
     49                                  ; ------------------------------------------------------------
-    50                                  ; ap_to_core_entry
-    51                                  ; 功能: 应用处理器（AP）进入内核的入口点
-    52                                  ; ------------------------------------------------------------
-    53                                  ap_to_core_entry:
-    54                                      ; 启用 GDT 的高端线性地址并加载 IDTR
-    55 000009B4 48B8007E00000080FF-         mov rax, UPPER_SDA_LINEAR
-    55 000009BD FF                 
-    56 000009BE 0F0110                      lgdt [rax + 0]                                  ; 只有 64 位模式下才能加载 64 位线性地址
-    57 000009C1 0F01580C                    lidt [rax + 0x0c]
-    58                                  
-    59                                      ; 为当前处理器创建 64 位 模式下专属栈
-    60 000009C5 B900100000                  mov rcx, 4096
-    61 000009CA E8C5FDFFFF                  call core_memory_allocate
-    62 000009CF 4C89F4                      mov rsp, r14 
-    63                                  
-    64                                      ; 创建当前处理器的专属存储区(格式见书中 348 页)
-    65 000009D2 B900010000                  mov rcx, 256                                    ; 专属数据区长度, 含 TSS
-    66 000009D7 E8B8FDFFFF                  call core_memory_allocate
-    67 000009DC 498D8580000000              lea rax, [r13 + 128]                            ; TSS 开始于专属存储区偏移为 128 的地方
-    68 000009E3 E85DF7FFFF                  call make_tss_descriptor
-    69                                  
-    70 000009E8 49BF007E00000080FF-         mov r15, UPPER_SDA_LINEAR
-    70 000009F1 FF                 
-    71                                  
-    72                                      ; 安装 TSS 描述符到 GDT
-    73 000009F2 4D8B4704                    mov r8, [r15 + 4]                               ; r8=gdt 的线性地址
-    74 000009F6 490FB74F02                  movzx rcx, word [r15 + 2]                       ; rcx=gdt 的界限值
-    75 000009FB 4989740801                  mov [r8 + rcx + 1], rsi                         ; TSS 描述符的低 64 位
-    76 00000A00 49897C0809                  mov [r8 + rcx + 9], rdi                         ; TSS 描述符的高 64 位
-    77                                  
-    78 00000A05 664183470210                add word [r15 + 2], 16                          ; TSS 大小
-    79 00000A0B 410F015702                  lgdt [r15 + 2]                                  ; 重新加载 GDTR
-    80                                  
-    81 00000A10 66C1E903                    shr cx, 3                                       ; 除 8 得到索引
-    82 00000A14 66FFC1                      inc cx                                          ; 找到 TSS 描述符
-    83 00000A17 66C1E103                    shl cx, 3                                       ; 乘 8 得到正确偏移
-    84                                  
-    85 00000A1B 0F00D9                      ltr cx                                          ; 为当前任务加载任务寄存器 TR
-    86                                  
-    87                                      ; 将处理器专属数据区首地址保存到当前处理器的型号专属寄存器 IA32_KERNEL_GS_BASE
-    88 00000A1E B9020100C0                  mov ecx, 0xc000_0102                            ; IA32_KERNEL_GS_BASE
-    89 00000A23 4C89E8                      mov rax, r13                                    ; 只用 EAX
-    90 00000A26 4C89EA                      mov rdx, r13 
-    91 00000A29 48C1EA20                    shr rdx, 32 
-    92 00000A2D 0F30                        wrmsr 
-    93                                  
-    94                                      ; 为快速系统调用 SYSCALL 和 SYSRET 准备参数
-    95 00000A2F B9800000C0                  mov ecx, 0x0c0000080                            ; 指定型号专属寄存器 IA32_EFER
-    96 00000A34 0F32                        rdmsr 
-    97 00000A36 0FBAE800                    bts eax, 0                                      ; 设置 SCE 位，允许 SYSCALL 指令
-    98 00000A3A 0F30                        wrmsr
-    99                                  
-   100 00000A3C B9810000C0                  mov ecx, 0xc0000081                             ; STAR
-   101 00000A41 BA18002B00                  mov edx, (RESVD_DESC_SEL << 16) | CORE_CODE64_SEL
-   102 00000A46 0F30                        wrmsr
+    50 000009B2 F900                    _ap_string      db 249, 0
+    51                                  
+    52                                  ap_to_core_entry:
+    53                                      ; 启用 GDT 的高端线性地址并加载 IDTR
+    54 000009B4 48B8007E00000080FF-         mov rax, UPPER_SDA_LINEAR
+    54 000009BD FF                 
+    55 000009BE 0F015002                    lgdt [rax + 2]                                  ; 只有 64 位模式下才能加载 64 位线性地址
+    56 000009C2 0F01580C                    lidt [rax + 0x0c]
+    57                                  
+    58                                      ; 为当前处理器创建 64 位 模式下专属栈
+    59 000009C6 B900100000                  mov rcx, 4096
+    60 000009CB E8C4FDFFFF                  call core_memory_allocate
+    61 000009D0 4C89F4                      mov rsp, r14 
+    62                                  
+    63                                      ; 创建当前处理器的专属存储区(格式见书中 348 页)
+    64 000009D3 B900010000                  mov rcx, 256                                    ; 专属数据区长度, 含 TSS
+    65 000009D8 E8B7FDFFFF                  call core_memory_allocate
+    66 000009DD 498D8580000000              lea rax, [r13 + 128]                            ; TSS 开始于专属存储区偏移为 128 的地方
+    67 000009E4 E85CF7FFFF                  call make_tss_descriptor
+    68                                  
+    69 000009E9 49BF007E00000080FF-         mov r15, UPPER_SDA_LINEAR
+    69 000009F2 FF                 
+    70                                  
+    71                                      ; 安装 TSS 描述符到 GDT
+    72 000009F3 4D8B4704                    mov r8, [r15 + 4]                               ; r8=gdt 的线性地址
+    73 000009F7 490FB74F02                  movzx rcx, word [r15 + 2]                       ; rcx=gdt 的界限值
+    74 000009FC 4989740801                  mov [r8 + rcx + 1], rsi                         ; TSS 描述符的低 64 位
+    75 00000A01 49897C0809                  mov [r8 + rcx + 9], rdi                         ; TSS 描述符的高 64 位
+    76                                  
+    77 00000A06 664183470210                add word [r15 + 2], 16                          ; TSS 大小
+    78 00000A0C 410F015702                  lgdt [r15 + 2]                                  ; 重新加载 GDTR
+    79                                  
+    80 00000A11 66C1E903                    shr cx, 3                                       ; 除 8 得到索引
+    81 00000A15 66FFC1                      inc cx                                          ; 找到 TSS 描述符
+    82 00000A18 66C1E103                    shl cx, 3                                       ; 乘 8 得到正确偏移
+    83                                  
+    84 00000A1C 0F00D9                      ltr cx                                          ; 为当前任务加载任务寄存器 TR
+    85                                  
+    86                                      ; 将处理器专属数据区首地址保存到当前处理器的型号专属寄存器 IA32_KERNEL_GS_BASE
+    87 00000A1F B9020100C0                  mov ecx, 0xc000_0102                            ; IA32_KERNEL_GS_BASE
+    88 00000A24 4C89E8                      mov rax, r13                                    ; 只用 EAX
+    89 00000A27 4C89EA                      mov rdx, r13 
+    90 00000A2A 48C1EA20                    shr rdx, 32 
+    91 00000A2E 0F30                        wrmsr 
+    92                                  
+    93                                      ; 为快速系统调用 SYSCALL 和 SYSRET 准备参数
+    94 00000A30 B9800000C0                  mov ecx, 0x0c0000080                            ; 指定型号专属寄存器 IA32_EFER
+    95 00000A35 0F32                        rdmsr 
+    96 00000A37 0FBAE800                    bts eax, 0                                      ; 设置 SCE 位，允许 SYSCALL 指令
+    97 00000A3B 0F30                        wrmsr
+    98                                  
+    99 00000A3D B9810000C0                  mov ecx, 0xc0000081                             ; STAR
+   100 00000A42 BA18002B00                  mov edx, (RESVD_DESC_SEL << 16) | CORE_CODE64_SEL
+   101 00000A47 31C0                        xor eax, eax 
+   102 00000A49 0F30                        wrmsr
    103                                  
-   104 00000A48 B9820000C0                  mov ecx, 0xc0000082                             ; LSTAR
-   105 00000A4D 488B05(08000000)            mov rax, [rel position]
-   106 00000A54 488D80[700F0000]            lea rax, [rax + syscall_procedure]              ; 只用 EAX 部分
-   107 00000A5B 4889C2                      mov rdx, rax
-   108 00000A5E 48C1EA20                    shr rdx, 32                                     ; 使用 EDX 部分
-   109 00000A62 0F30                        wrmsr
+   104 00000A4B B9820000C0                  mov ecx, 0xc0000082                             ; LSTAR
+   105 00000A50 488B05(08000000)            mov rax, [rel position]
+   106 00000A57 488D80[6A0F0000]            lea rax, [rax + syscall_procedure]              ; 只用 EAX 部分
+   107 00000A5E 4889C2                      mov rdx, rax
+   108 00000A61 48C1EA20                    shr rdx, 32                                     ; 使用 EDX 部分
+   109 00000A65 0F30                        wrmsr
    110                                  
-   111 00000A64 B9840000C0                  mov ecx, 0xc0000084                             ; FMASK
-   112 00000A69 31D2                        xor edx, edx
-   113 00000A6B B800770400                  mov eax, 0x00047700                             ; 要求 TF=IF=DF=AC=0, IOPL=00
-   114 00000A70 0F30                        wrmsr
+   111 00000A67 B9840000C0                  mov ecx, 0xc0000084                             ; FMASK
+   112 00000A6C 31D2                        xor edx, edx
+   113 00000A6E B800770400                  mov eax, 0x00047700                             ; 要求 TF=IF=DF=AC=0, IOPL=00
+   114 00000A73 0F30                        wrmsr
    115                                  
-   116 00000A72 4C8B3D(08000000)            mov r15, [rel position]
-   117 00000A79 498D9F[B2090000]            lea rbx, [r15 + _ap_string]
-   118 00000A80 E87BF5FFFF                  call put_string64
+   116 00000A75 4C8B3D(08000000)            mov r15, [rel position]
+   117 00000A7C 498D9F[B2090000]            lea rbx, [r15 + _ap_string]
+   118 00000A83 E878F5FFFF                  call put_string64
    119                                  
-   120 00000A85 0F01F8                      swapgs                                          ; 准备用 GS 操作当前处理器的专属数据, IA32_KERNEL_GS_BASE 与 GS 互换内容
-   121 00000A88 6548C7042508000000-         mov qword [gs:8], 0                             ; PCB 的线性地址 = 0, 没有正在执行的任务
-   121 00000A91 00000000           
-   122 00000A95 4831C0                      xor rax, rax 
-   123 00000A98 8A05(31010000)              mov al, byte [rel ack_cpus]
-   124 00000A9E 654889042510000000          mov [gs:16], rax                                ; 设置处理器编号
-   125 00000AA7 654889242518000000          mov [gs:24], rsp                                ; 保存当前处理器的固有栈指针
-   126 00000AB0 0F01F8                      swapgs
+   120 00000A88 0F01F8                      swapgs                                          ; 准备用 GS 操作当前处理器的专属数据, IA32_KERNEL_GS_BASE 与 GS 互换内容
+   121 00000A8B 6548C7042508000000-         mov qword [gs:8], 0                             ; PCB 的线性地址 = 0, 没有正在执行的任务
+   121 00000A94 00000000           
+   122 00000A98 4831C0                      xor rax, rax 
+   123 00000A9B 8A05(31010000)              mov al, byte [rel ack_cpus]
+   124 00000AA1 654889042510000000          mov [gs:16], rax                                ; 设置处理器编号
+   125 00000AAA 654889242518000000          mov [gs:24], rsp                                ; 保存当前处理器的固有栈指针
+   126 00000AB3 0F01F8                      swapgs
    127                                  
-   128 00000AB3 FE05(31010000)              inc byte [rel ack_cpus]                         ; 递增应答计数值
+   128 00000AB6 FE05(31010000)              inc byte [rel ack_cpus]                         ; 递增应答计数值
    129                                  
-   130 00000AB9 C60425[82F00000]00          mov byte [AP_START_UP_ADDR + lock_var], 0       ; 释放自旋锁
+   130 00000ABC C60425[82F00000]00          mov byte [AP_START_UP_ADDR + lock_var], 0       ; 释放自旋锁
    131                                  
-   132 00000AC1 48BE00E0FFFF7FFFFF-         mov rsi, LAPIC_START_ADDR                       ; Local APIC 的线性地址
-   132 00000ACA FF                 
-   133 00000ACB 0FBAAEF000000008            bts dword [rsi + 0xf0], 8                       ; 设置 SVR 寄存器, 允许 LAPIC
+   132 00000AC4 48BE00E0FFFF7FFFFF-         mov rsi, LAPIC_START_ADDR                       ; Local APIC 的线性地址
+   132 00000ACD FF                 
+   133 00000ACE 0FBAAEF000000008            bts dword [rsi + 0xf0], 8                       ; 设置 SVR 寄存器, 允许 LAPIC
    134                                  
-   135 00000AD3 FB                          sti                                             ; 开放中断
+   135 00000AD6 FB                          sti                                             ; 开放中断
    136                                  
    137                                  .do_idle:
-   138 00000AD4 F4                          hlt 
-   139 00000AD5 EBFD                        jmp .do_idle
+   138 00000AD7 F4                          hlt 
+   139 00000AD8 EBFD                        jmp .do_idle
    140                                  
    141                                  ; ------------------------------------------------------------
    142                                  ; general_interrupt_handler
    143                                  ; 功能: 通用中断处理
    144                                  ; ------------------------------------------------------------
    145                                  general_interrupt_handler:
-   146 00000AD7 48CF                        iretq
+   146 00000ADA 48CF                        iretq
    147                                  
    148                                  ; ------------------------------------------------------------
    149                                  ; general_exception_handler
    150                                  ; 功能: 通用异常处理
    151                                  ; ------------------------------------------------------------
    152                                  general_exception_handler:
-   153 00000AD9 4C8B3D(08000000)            mov r15, [rel position]                         ; 在 24 行 0 列显示红底白字的错误信息
-   154 00000AE0 498D9F[F50A0000]            lea rbx, [r15 + exceptm]
-   155 00000AE7 B618                        mov dh, 24
-   156 00000AE9 B200                        mov dl, 0
-   157 00000AEB 41B14F                      mov r9b, 0x4f 
-   158 00000AEE E8EBF5FFFF                  call put_cstringxy64                            ; 在 core_utils64.asm 中实现
+   153 00000ADC 4C8B3D(08000000)            mov r15, [rel position]                         ; 在 24 行 0 列显示红底白字的错误信息
+   154 00000AE3 498D9F[F80A0000]            lea rbx, [r15 + exceptm]
+   155 00000AEA B618                        mov dh, 24
+   156 00000AEC B200                        mov dl, 0
+   157 00000AEE 41B14F                      mov r9b, 0x4f 
+   158 00000AF1 E8E8F5FFFF                  call put_cstringxy64                            ; 在 core_utils64.asm 中实现
    159                                  
-   160 00000AF3 FA                          cli 
-   161 00000AF4 F4                          hlt                                             ; 停机且不接受外部硬件中断
+   160 00000AF6 FA                          cli 
+   161 00000AF7 F4                          hlt                                             ; 停机且不接受外部硬件中断
    162                                  
-   163 00000AF5 412065786365707469-     exceptm         db "A exception raised, halt.", 0   ; 发生异常时的错误信息
-   163 00000AFE 6F6E20726169736564-
-   163 00000B07 2C2068616C742E00   
+   163 00000AF8 412065786365707469-     exceptm         db "A exception raised, halt.", 0   ; 发生异常时的错误信息
+   163 00000B01 6F6E20726169736564-
+   163 00000B0A 2C2068616C742E00   
    164                                  
    165                                  ; ------------------------------------------------------------
    166                                  ; search_for_a_ready_task
@@ -1328,36 +1328,36 @@
    168                                  ; 输出: r11=就绪任务的 PCB 线性地址
    169                                  ; ------------------------------------------------------------
    170                                  search_for_a_ready_task:
-   171 00000B0F 50                          push rax 
-   172 00000B10 53                          push rbx 
-   173 00000B11 51                          push rcx 
+   171 00000B12 50                          push rax 
+   172 00000B13 53                          push rbx 
+   173 00000B14 51                          push rcx 
    174                                  
-   175 00000B12 B901000000                  mov rcx, 1                                      ; rcx=任务的“忙”状态
+   175 00000B15 B901000000                  mov rcx, 1                                      ; rcx=任务的“忙”状态
    176                                  
-   177 00000B17 0F01F8                      swapgs 
-   178 00000B1A 65488B1C2508000000          mov rbx, [gs:8]                                 ; 取得当前任务的 PCB 线性地址
-   179 00000B23 0F01F8                      swapgs
-   180 00000B26 4989DB                      mov r11, rbx 
-   181 00000B29 4883FB00                    cmp rbx, 0                                      ; 专属数据区存的 PCB 线性地址为 0, 也就是刚初始化
-   182 00000B2D 750A                        jne .again
-   183 00000B2F 488B1D(A1020000)            mov rbx, [rel pcb_ptr]                          ; 那就从链表头部开始找
-   184 00000B36 4989DB                      mov r11, rbx 
+   177 00000B1A 0F01F8                      swapgs 
+   178 00000B1D 65488B1C2508000000          mov rbx, [gs:8]                                 ; 取得当前任务的 PCB 线性地址
+   179 00000B26 0F01F8                      swapgs
+   180 00000B29 4989DB                      mov r11, rbx 
+   181 00000B2C 4883FB00                    cmp rbx, 0                                      ; 专属数据区存的 PCB 线性地址为 0, 也就是刚初始化
+   182 00000B30 750A                        jne .again
+   183 00000B32 488B1D(A1020000)            mov rbx, [rel pcb_ptr]                          ; 那就从链表头部开始找
+   184 00000B39 4989DB                      mov r11, rbx 
    185                                  .again:
-   186 00000B39 4D8B9B18010000              mov r11, [r11 + 280]                            ; 取得下一个节点
-   187 00000B40 4831C0                      xor rax, rax 
-   188 00000B43 F0490FB14B10                lock cmpxchg [r11 + 16], rcx                    ; 原子操作, 详情见 374 页
-   189 00000B49 740A                        jz .return
-   190 00000B4B 4939DB                      cmp r11, rbx                                    ; 是否转一圈回到当前节点?
-   191 00000B4E 7402                        je .fmiss                                       ; 是, 未找到就绪任务
-   192 00000B50 EBE7                        jmp .again
+   186 00000B3C 4D8B9B18010000              mov r11, [r11 + 280]                            ; 取得下一个节点
+   187 00000B43 4831C0                      xor rax, rax 
+   188 00000B46 F0490FB14B10                lock cmpxchg [r11 + 16], rcx                    ; 原子操作, 详情见 374 页
+   189 00000B4C 740A                        jz .return
+   190 00000B4E 4939DB                      cmp r11, rbx                                    ; 是否转一圈回到当前节点?
+   191 00000B51 7402                        je .fmiss                                       ; 是, 未找到就绪任务
+   192 00000B53 EBE7                        jmp .again
    193                                  
    194                                  .fmiss:
-   195 00000B52 4D31DB                      xor r11, r11 
+   195 00000B55 4D31DB                      xor r11, r11 
    196                                  .return:
-   197 00000B55 59                          pop rcx 
-   198 00000B56 5B                          pop rbx 
-   199 00000B57 58                          pop rax 
-   200 00000B58 C3                          ret 
+   197 00000B58 59                          pop rcx 
+   198 00000B59 5B                          pop rbx 
+   199 00000B5A 58                          pop rax 
+   200 00000B5B C3                          ret 
    201                                  
    202                                  ; ------------------------------------------------------------
    203                                  ; resume_execute_a_task
@@ -1365,831 +1365,817 @@
    205                                  ; 输入: r11=指定任务的 PCB 线性地址, 本程序在中断处理过程内调用，默认中断是关闭状态。
    206                                  ; ------------------------------------------------------------
    207                                  resume_execute_a_task:
-   208 00000B59 8B05(32010000)              mov eax, [rel clocks_1ms]                       ; 以下计算新任务运行时间
-   209 00000B5F 418B9BF0000000              mov ebx, [r11 + 240]                            ; 任务制定的时间片
-   210 00000B66 F7E3                        mul ebx 
+   208 00000B5C 8B05(32010000)              mov eax, [rel clocks_1ms]                       ; 以下计算新任务运行时间
+   209 00000B62 418B9BF0000000              mov ebx, [r11 + 240]                            ; 任务制定的时间片
+   210 00000B69 F7E3                        mul ebx 
    211                                  
-   212 00000B68 48BE00E0FFFF7FFFFF-         mov rsi, LAPIC_START_ADDR
-   212 00000B71 FF                 
-   213 00000B72 48C786E00300000B00-         mov qword [rsi + 0x3e0], 0x0b                   ; 1 分频
-   213 00000B7B 0000               
-   214 00000B7D 48C78620030000FD00-         mov qword [rsi + 0x320], 0xfd                   ; 单次击发模式, Fixed, 中断信号 0xfd, 详情见书中 276 页
-   214 00000B86 0000               
+   212 00000B6B 48BE00E0FFFF7FFFFF-         mov rsi, LAPIC_START_ADDR
+   212 00000B74 FF                 
+   213 00000B75 C786E00300000B0000-         mov dword [rsi + 0x3e0], 0x0b                   ; 1 分频
+   213 00000B7E 00                 
+   214 00000B7F C78620030000FD0000-         mov dword [rsi + 0x320], 0xfd                   ; 单次击发模式, Fixed, 中断信号 0xfd, 详情见书中 276 页
+   214 00000B88 00                 
    215                                  
-   216 00000B88 498B5B38                    mov rbx, [r11 + 56]
-   217 00000B8C 0F22DB                      mov cr3, rbx                                    ; 切换地址空间
+   216 00000B89 498B5B38                    mov rbx, [r11 + 56]
+   217 00000B8D 0F22DB                      mov cr3, rbx                                    ; 切换地址空间
    218                                  
-   219 00000B8F 0F01F8                      swapgs
-   220 00000B92 654C891C2508000000          mov [gs:8], r11                                 ; 将新任务设置为当前任务
+   219 00000B90 0F01F8                      swapgs
+   220 00000B93 654C891C2508000000          mov [gs:8], r11                                 ; 将新任务设置为当前任务
    221                                      ; mov qword [r11 + 16], 1                         ; 置任务状态为忙, 在 lock cmpxchg [r11 + 16], rcx 中已经被设置
-   222 00000B9B 498B5B20                    mov rbx, [r11 + 32]                             ; 取 PCB 中的 RSP0
-   223 00000B9F 6548891C2584000000          mov [gs:128 + 4], rbx                           ; 置 TSS 中的 RSP0
-   224 00000BA8 0F01F8                      swapgs
+   222 00000B9C 498B5B20                    mov rbx, [r11 + 32]                             ; 取 PCB 中的 RSP0
+   223 00000BA0 6548891C2584000000          mov [gs:128 + 4], rbx                           ; 置 TSS 中的 RSP0
+   224 00000BA9 0F01F8                      swapgs
    225                                  
-   226 00000BAB 498B4B50                    mov rcx, [r11 + 80]
-   227 00000BAF 498B5358                    mov rdx, [r11 + 88]
-   228 00000BB3 498B7B68                    mov rdi, [r11 + 104]
-   229 00000BB7 498B6B70                    mov rbp, [r11 + 112]
-   230 00000BBB 498B6378                    mov rsp, [r11 + 120]
-   231 00000BBF 4D8B8380000000              mov r8, [r11 + 128]
-   232 00000BC6 4D8B8B88000000              mov r9, [r11 + 136]
-   233 00000BCD 4D8B9390000000              mov r10, [r11 + 144]
-   234 00000BD4 4D8BA3A0000000              mov r12, [r11 + 160]
-   235 00000BDB 4D8BABA8000000              mov r13, [r11 + 168]
-   236 00000BE2 4D8BB3B0000000              mov r14, [r11 + 176]
-   237 00000BE9 4D8BBBB8000000              mov r15, [r11 + 184]
-   238 00000BF0 41FFB3D0000000              push qword [r11 + 208]                          ; SS
-   239 00000BF7 41FF7378                    push qword [r11 + 120]                          ; RSP
-   240 00000BFB 41FFB3E8000000              push qword [r11 + 232]                          ; RFLAGS
-   241 00000C02 41FFB3C8000000              push qword [r11 + 200]                          ; CS
-   242 00000C09 41FFB3C0000000              push qword [r11 + 192]                          ; RIP
+   226 00000BAC 498B4B50                    mov rcx, [r11 + 80]
+   227 00000BB0 498B5358                    mov rdx, [r11 + 88]
+   228 00000BB4 498B7B68                    mov rdi, [r11 + 104]
+   229 00000BB8 498B6B70                    mov rbp, [r11 + 112]
+   230 00000BBC 498B6378                    mov rsp, [r11 + 120]
+   231 00000BC0 4D8B8380000000              mov r8, [r11 + 128]
+   232 00000BC7 4D8B8B88000000              mov r9, [r11 + 136]
+   233 00000BCE 4D8B9390000000              mov r10, [r11 + 144]
+   234 00000BD5 4D8BA3A0000000              mov r12, [r11 + 160]
+   235 00000BDC 4D8BABA8000000              mov r13, [r11 + 168]
+   236 00000BE3 4D8BB3B0000000              mov r14, [r11 + 176]
+   237 00000BEA 4D8BBBB8000000              mov r15, [r11 + 184]
+   238 00000BF1 41FFB3D0000000              push qword [r11 + 208]                          ; SS
+   239 00000BF8 41FF7378                    push qword [r11 + 120]                          ; RSP
+   240 00000BFC 41FFB3E8000000              push qword [r11 + 232]                          ; RFLAGS
+   241 00000C03 41FFB3C8000000              push qword [r11 + 200]                          ; CS
+   242 00000C0A 41FFB3C0000000              push qword [r11 + 192]                          ; RIP
    243                                  
-   244 00000C10 898680030000                mov dword [rsi + 0x380], eax                    ; 开始计时
+   244 00000C11 898680030000                mov dword [rsi + 0x380], eax                    ; 开始计时
    245                                  
-   246 00000C16 498B4340                    mov rax, [r11 + 64]
-   247 00000C1A 498B5B48                    mov rbx, [r11 + 72]
-   248 00000C1E 498B7360                    mov rsi, [r11 + 96]
-   249 00000C22 4D8B9B98000000              mov r11, [r11 + 152]
+   246 00000C17 498B4340                    mov rax, [r11 + 64]
+   247 00000C1B 498B5B48                    mov rbx, [r11 + 72]
+   248 00000C1F 498B7360                    mov rsi, [r11 + 96]
+   249 00000C23 4D8B9B98000000              mov r11, [r11 + 152]
    250                                  
-   251 00000C29 48CF                        iretq                                           ; 转入新任务的空间执行
+   251 00000C2A 48CF                        iretq                                           ; 转入新任务的空间执行
    252                                  
    253                                  ; ------------------------------------------------------------
    254                                  ; time_slice_out_handler
    255                                  ; 功能: 时间片到期中断的处理过程
    256                                  ; ------------------------------------------------------------
    257                                  time_slice_out_handler:
-   258 00000C2B 50                          push rax
-   259 00000C2C 53                          push rbx 
-   260 00000C2D 4153                        push r11 
+   258 00000C2C 50                          push rax
+   259 00000C2D 53                          push rbx 
+   260 00000C2E 4153                        push r11 
    261                                  
-   262 00000C2F 49BB00E0FFFF7FFFFF-         mov r11, LAPIC_START_ADDR                       ; 给 Local APIC 发送中断结束命令 EOI
-   262 00000C38 FF                 
-   263 00000C39 41C783B00000000000-         mov dword [r11 + 0xb0], 0
-   263 00000C42 0000               
+   262 00000C30 49BB00E0FFFF7FFFFF-         mov r11, LAPIC_START_ADDR                       ; 给 Local APIC 发送中断结束命令 EOI
+   262 00000C39 FF                 
+   263 00000C3A 41C783B00000000000-         mov dword [r11 + 0xb0], 0
+   263 00000C43 0000               
    264                                  
-   265 00000C44 E8C6FEFFFF                  call search_for_a_ready_task
-   266 00000C49 4D09DB                      or r11, r11 
-   267 00000C4C 0F8494000000                jz .return                                      ; 未找到就绪任务
+   265 00000C45 E8C8FEFFFF                  call search_for_a_ready_task
+   266 00000C4A 4D09DB                      or r11, r11 
+   267 00000C4D 0F8494000000                jz .return                                      ; 未找到就绪任务
    268                                  
-   269 00000C52 0F01F8                      swapgs
-   270 00000C55 65488B042508000000          mov rax, qword [gs:8]                           ; 当前任务的 PCB 线性地址
-   271 00000C5E 0F01F8                      swapgs
+   269 00000C53 0F01F8                      swapgs
+   270 00000C56 65488B042508000000          mov rax, qword [gs:8]                           ; 当前任务的 PCB 线性地址
+   271 00000C5F 0F01F8                      swapgs
    272                                  
    273                                      ; 保存当前任务的状态以便将来恢复执行。
-   274 00000C61 0F20DB                      mov rbx, cr3                                    ; 保存原任务的分页系统
-   275 00000C64 48895838                    mov qword [rax + 56], rbx
+   274 00000C62 0F20DB                      mov rbx, cr3                                    ; 保存原任务的分页系统
+   275 00000C65 48895838                    mov qword [rax + 56], rbx
    276                                      ; mov [rax + 64], rax                            ; 不需设置，将来恢复执行时从栈中弹出
    277                                      ; mov [rax + 72], rbx                            ; 不需设置，将来恢复执行时从栈中弹出
-   278 00000C68 48894850                    mov [rax + 80], rcx
-   279 00000C6C 48895058                    mov [rax + 88], rdx
-   280 00000C70 48897060                    mov [rax + 96], rsi
-   281 00000C74 48897868                    mov [rax + 104], rdi
-   282 00000C78 48896870                    mov [rax + 112], rbp
-   283 00000C7C 48896078                    mov [rax + 120], rsp
-   284 00000C80 4C898080000000              mov [rax + 128], r8
-   285 00000C87 4C898888000000              mov [rax + 136], r9
-   286 00000C8E 4C899090000000              mov [rax + 144], r10
+   278 00000C69 48894850                    mov [rax + 80], rcx
+   279 00000C6D 48895058                    mov [rax + 88], rdx
+   280 00000C71 48897060                    mov [rax + 96], rsi
+   281 00000C75 48897868                    mov [rax + 104], rdi
+   282 00000C79 48896870                    mov [rax + 112], rbp
+   283 00000C7D 48896078                    mov [rax + 120], rsp
+   284 00000C81 4C898080000000              mov [rax + 128], r8
+   285 00000C88 4C898888000000              mov [rax + 136], r9
+   286 00000C8F 4C899090000000              mov [rax + 144], r10
    287                                      ;mov [rax + 152], r11                           ; 不需设置，将来恢复执行时从栈中弹出
-   288 00000C95 4C89A0A0000000              mov [rax + 160], r12
-   289 00000C9C 4C89A8A8000000              mov [rax + 168], r13
-   290 00000CA3 4C89B0B0000000              mov [rax + 176], r14
-   291 00000CAA 4C89B8B8000000              mov [rax + 184], r15
-   292 00000CB1 488B1D(08000000)            mov rbx, [rel position]
-   293 00000CB8 488D9B[E60C0000]            lea rbx, [rbx + .return]                        ; 将来恢复执行时，是从中断返回
-   294 00000CBF 488998C0000000              mov [rax + 192], rbx                            ; RIP域为中断返回点
-   295 00000CC6 8C88C8000000                mov [rax + 200], cs
-   296 00000CCC 8C90D0000000                mov [rax + 208], ss
-   297 00000CD2 9C                          pushfq
-   298 00000CD3 8F80E8000000                pop qword [rax + 232]
+   288 00000C96 4C89A0A0000000              mov [rax + 160], r12
+   289 00000C9D 4C89A8A8000000              mov [rax + 168], r13
+   290 00000CA4 4C89B0B0000000              mov [rax + 176], r14
+   291 00000CAB 4C89B8B8000000              mov [rax + 184], r15
+   292 00000CB2 488B1D(08000000)            mov rbx, [rel position]
+   293 00000CB9 488D9B[E70C0000]            lea rbx, [rbx + .return]                        ; 将来恢复执行时，是从中断返回
+   294 00000CC0 488998C0000000              mov [rax + 192], rbx                            ; RIP域为中断返回点
+   295 00000CC7 8C88C8000000                mov [rax + 200], cs
+   296 00000CCD 8C90D0000000                mov [rax + 208], ss
+   297 00000CD3 9C                          pushfq
+   298 00000CD4 8F80E8000000                pop qword [rax + 232]
    299                                  
-   300 00000CD9 48C7401000000000            mov qword [rax + 16], 0                         ; 置任务状态为就绪
+   300 00000CDA 48C7401000000000            mov qword [rax + 16], 0                         ; 置任务状态为就绪
    301                                  
-   302 00000CE1 E973FEFFFF                  jmp resume_execute_a_task                       ; 恢复并执行新任务
+   302 00000CE2 E975FEFFFF                  jmp resume_execute_a_task                       ; 恢复并执行新任务
    303                                  
    304                                  .return:
-   305 00000CE6 415B                        pop r11
-   306 00000CE8 5B                          pop rbx 
-   307 00000CE9 58                          pop rax 
-   308 00000CEA 48CF                        iretq
+   305 00000CE7 415B                        pop r11
+   306 00000CE9 5B                          pop rbx 
+   307 00000CEA 58                          pop rax 
+   308 00000CEB 48CF                        iretq
    309                                  
    310                                  ; ------------------------------------------------------------
    311                                  ; new_task_notify_handler
    312                                  ; 功能: 新任务创建后，将广播新任务创建消息给所有处理器，所有处理器执行此中断服务例程。
    313                                  ; ------------------------------------------------------------
    314                                  new_task_notify_handler:
-   315 00000CEC 56                          push rsi 
-   316 00000CED 4153                        push r11 
+   315 00000CED 56                          push rsi 
+   316 00000CEE 4153                        push r11 
    317                                  
-   318 00000CEF 48BE00E0FFFF7FFFFF-         mov rsi, LAPIC_START_ADDR                       
-   318 00000CF8 FF                 
-   319 00000CF9 C786B0000000000000-         mov dword [rsi + 0xb0], 0                       ; 发送 EOI
-   319 00000D02 00                 
+   318 00000CF0 48BE00E0FFFF7FFFFF-         mov rsi, LAPIC_START_ADDR                       
+   318 00000CF9 FF                 
+   319 00000CFA C786B0000000000000-         mov dword [rsi + 0xb0], 0                       ; 发送 EOI
+   319 00000D03 00                 
    320                                  
-   321 00000D03 0F01F8                      swapgs
-   322 00000D06 6548833C2508000000-         cmp qword [gs:8], 0                             ; 当前处理器没有任务执行吗?
-   322 00000D0F 00                 
-   323 00000D10 0F01F8                      swapgs
-   324 00000D13 751F                        jne .return 
+   321 00000D04 0F01F8                      swapgs
+   322 00000D07 6548833C2508000000-         cmp qword [gs:8], 0                             ; 当前处理器没有任务执行吗?
+   322 00000D10 00                 
+   323 00000D11 0F01F8                      swapgs
+   324 00000D14 7522                        jne .return 
    325                                  
-   326 00000D15 E8F5FDFFFF                  call search_for_a_ready_task
-   327 00000D1A 4D09DB                      or r11, r11 
-   328 00000D1D 7415                        jz .return                                      ; 未找到就绪任务
+   326 00000D16 E8F7FDFFFF                  call search_for_a_ready_task
+   327 00000D1B 4D09DB                      or r11, r11 
+   328 00000D1E 7418                        jz .return                                      ; 未找到就绪任务
    329                                  
-   330 00000D1F 4883C410                    add rsp, 16,                                    ; 去掉前面压入的两个
-   331 00000D23 654889242518000000          mov qword [gs:24], rsp                          ; 保存固有栈当前指针, 以便将来返回, 在进入中断时 RIP → CS → RFLAGS → RSP → SS 按顺序入栈
-   332 00000D2C 0F01F8                      swapgs
-   333                                  
-   334 00000D2F E925FEFFFF                  jmp resume_execute_a_task                       ; 执行新任务
-   335                                  
-   336                                  .return:
-   337 00000D34 415B                        pop r11
-   338 00000D36 5E                          pop rsi 
-   339 00000D37 48CF                        iretq 
-   340                                  
-   341                                  ; ------------------------------------------------------------
-   342                                  ; general_8259ints_handler
-   343                                  ; 功能: 通用的 8259 中断处理过程
-   344                                  ; ------------------------------------------------------------
-   345                                  general_8259ints_handler:
-   346 00000D39 50                          push rax 
-   347                                  
-   348 00000D3A B020                        mov al, 0x20                                    ; 中断结束命令 EOI
-   349 00000D3C E6A0                        out 0xa0, al                                    ; 向从片发送
-   350 00000D3E E620                        out 0x20, al                                    ; 向主片发送
-   351                                  
-   352 00000D40 58                          pop rax 
-   353                                  
-   354 00000D41 48CF                        iretq
-   355                                  
-   356                                  ; ------------------------------------------------------------
-   357                                  ; append_to_pcb_link
-   358                                  ; 功能: 在 PCB 链上追加任务控制块
-   359                                  ; 输入: r11=PCB 线性基地址
-   360                                  ; ------------------------------------------------------------
-   361 00000D43 0000000000000000        _append_lock dq 0
-   362                                  
-   363                                  append_to_pcb_link:
-   364 00000D4B 50                          push rax 
-   365 00000D4C 53                          push rbx 
-   366                                  
-   367 00000D4D 9C                          pushfq
-   368 00000D4E FA                          cli 
-   369                                      SET_SPIN_LOCK rax, qword [rel _append_lock]
+   330 00000D20 0F01F8                      swapgs
+   331 00000D23 4883C410                    add rsp, 16,                                    ; 去掉前面压入的两个
+   332 00000D27 654889242518000000          mov qword [gs:24], rsp                          ; 保存固有栈当前指针, 以便将来返回, 在进入中断时 RIP → CS → RFLAGS → RSP → SS 按顺序入栈
+   333 00000D30 0F01F8                      swapgs
+   334                                  
+   335 00000D33 E924FEFFFF                  jmp resume_execute_a_task                       ; 执行新任务
+   336                                  
+   337                                  .return:
+   338 00000D38 415B                        pop r11
+   339 00000D3A 5E                          pop rsi
+   340 00000D3B 48CF                        iretq 
+   341                                  
+   342                                  ; ------------------------------------------------------------
+   343                                  ; append_to_pcb_link
+   344                                  ; 功能: 在 PCB 链上追加任务控制块
+   345                                  ; 输入: r11=PCB 线性基地址
+   346                                  ; ------------------------------------------------------------
+   347 00000D3D 0000000000000000        _append_lock dq 0
+   348                                  
+   349                                  append_to_pcb_link:
+   350 00000D45 50                          push rax 
+   351 00000D46 53                          push rbx 
+   352                                  
+   353 00000D47 9C                          pushfq
+   354 00000D48 FA                          cli 
+   355                                      SET_SPIN_LOCK rax, qword [rel _append_lock]
     49                              <1>  %%spin_lock:
-    50 00000D4F 48833DECFFFFFF00    <1>  cmp %2, 0
-    51 00000D57 7404                <1>  je %%get_lock
-    52 00000D59 F390                <1>  pause
-    53 00000D5B EBF2                <1>  jmp %%spin_lock
+    50 00000D49 48833DECFFFFFF00    <1>  cmp %2, 0
+    51 00000D51 7404                <1>  je %%get_lock
+    52 00000D53 F390                <1>  pause
+    53 00000D55 EBF2                <1>  jmp %%spin_lock
     54                              <1>  %%get_lock:
-    55 00000D5D B801000000          <1>  mov %1, 1
-    56 00000D62 488705DAFFFFFF      <1>  xchg %1, %2
-    57 00000D69 4883F800            <1>  cmp %1, 0
-    58 00000D6D 75E0                <1>  jne %%spin_lock
-   370                                  
-   371 00000D6F 488B1D(A1020000)            mov rbx, [rel pcb_ptr]                          ; 取得链表首节点的线性地址
-   372 00000D76 4809DB                      or rbx, rbx 
-   373 00000D79 7513                        jnz .not_empty                                  ; 链表非空就跳转
-   374 00000D7B 4D891B                      mov [r11], r11                                  ; 唯一的节点, 前驱是自己
-   375 00000D7E 4D899B18010000              mov [r11 + 280], r11                            ; 后继节点也是自己
-   376 00000D85 4C891D(A1020000)            mov [rel pcb_ptr], r11                          ; 填入内核
-   377 00000D8C EB17                        jmp .return 
-   378                                  
-   379                                  .not_empty:
-   380                                      ; rbx=头节点, rax=头节点的前驱节点, r11=追加的节点
-   381 00000D8E 488B03                      mov rax, [rbx]                                  ; 取得头节点的前驱线性地址
-   382 00000D91 4C899818010000              mov [rax + 280], r11                            ; 头节点的后继是追加节点
-   383 00000D98 49899B18010000              mov [r11 + 280], rbx                            ; 追加节点的后继是头节点
-   384 00000D9F 498903                      mov [r11], rax                                  ; 追加节点的前驱是头节点的前驱
-   385 00000DA2 4C891B                      mov [rbx], r11                                  ; 头节点的前驱是追加节点
-   386                                  
-   387                                  .return:
-   388 00000DA5 48C70593FFFFFF0000-         mov qword [rel _append_lock], 0
-   388 00000DAE 0000               
-   389 00000DB0 9D                          popfq
-   390                                  
-   391 00000DB1 5B                          pop rbx 
-   392 00000DB2 58                          pop rax 
-   393                                  
-   394 00000DB3 C3                          ret 
+    55 00000D57 B801000000          <1>  mov %1, 1
+    56 00000D5C 488705DAFFFFFF      <1>  xchg %1, %2
+    57 00000D63 4883F800            <1>  cmp %1, 0
+    58 00000D67 75E0                <1>  jne %%spin_lock
+   356                                  
+   357 00000D69 488B1D(A1020000)            mov rbx, [rel pcb_ptr]                          ; 取得链表首节点的线性地址
+   358 00000D70 4809DB                      or rbx, rbx 
+   359 00000D73 7513                        jnz .not_empty                                  ; 链表非空就跳转
+   360 00000D75 4D891B                      mov [r11], r11                                  ; 唯一的节点, 前驱是自己
+   361 00000D78 4D899B18010000              mov [r11 + 280], r11                            ; 后继节点也是自己
+   362 00000D7F 4C891D(A1020000)            mov [rel pcb_ptr], r11                          ; 填入内核
+   363 00000D86 EB17                        jmp .return 
+   364                                  
+   365                                  .not_empty:
+   366                                      ; rbx=头节点, rax=头节点的前驱节点, r11=追加的节点
+   367 00000D88 488B03                      mov rax, [rbx]                                  ; 取得头节点的前驱线性地址
+   368 00000D8B 4C899818010000              mov [rax + 280], r11                            ; 头节点的后继是追加节点
+   369 00000D92 49899B18010000              mov [r11 + 280], rbx                            ; 追加节点的后继是头节点
+   370 00000D99 498903                      mov [r11], rax                                  ; 追加节点的前驱是头节点的前驱
+   371 00000D9C 4C891B                      mov [rbx], r11                                  ; 头节点的前驱是追加节点
+   372                                  
+   373                                  .return:
+   374 00000D9F 48C70593FFFFFF0000-         mov qword [rel _append_lock], 0
+   374 00000DA8 0000               
+   375 00000DAA 9D                          popfq
+   376                                  
+   377 00000DAB 5B                          pop rbx 
+   378 00000DAC 58                          pop rax 
+   379                                  
+   380 00000DAD C3                          ret 
+   381                                  
+   382                                  ; ------------------------------------------------------------
+   383                                  ; get_current_pid
+   384                                  ; 功能: 返回当前任务（进程）的标识
+   385                                  ; 输出: rax=当前任务（进程）的标识
+   386                                  ; ------------------------------------------------------------
+   387                                  get_current_pid:
+   388 00000DAE 9C                          pushfq
+   389 00000DAF FA                          cli 
+   390 00000DB0 0F01F8                      swapgs
+   391 00000DB3 65488B042508000000          mov rax, [gs:8]
+   392 00000DBC 488B4008                    mov rax, [rax + 8]
+   393 00000DC0 0F01F8                      swapgs
+   394 00000DC3 9D                          popfq
    395                                  
-   396                                  ; ------------------------------------------------------------
-   397                                  ; get_current_pid
-   398                                  ; 功能: 返回当前任务（进程）的标识
-   399                                  ; 输出: rax=当前任务（进程）的标识
-   400                                  ; ------------------------------------------------------------
-   401                                  get_current_pid:
-   402 00000DB4 9C                          pushfq
-   403 00000DB5 FA                          cli 
-   404 00000DB6 0F01F8                      swapgs
-   405 00000DB9 65488B042508000000          mov rax, [gs:8]
-   406 00000DC2 488B4008                    mov rax, [rax + 8]
-   407 00000DC6 0F01F8                      swapgs
-   408 00000DC9 9D                          popfq
-   409                                  
-   410 00000DCA C3                          ret 
-   411                                  
-   412                                  ; ------------------------------------------------------------
-   413                                  ; terminate_process
-   414                                  ; 功能: 终止当前任务
-   415                                  ; ------------------------------------------------------------
-   416                                  terminate_process:
-   417 00000DCB 48BE00E0FFFF7FFFFF-         mov rsi, LAPIC_START_ADDR
-   417 00000DD4 FF                 
-   418 00000DD5 C78620030000000001-         mov dword [rsi + 0x320], 0x00010000             ; 屏蔽定时器中断
-   418 00000DDE 00                 
-   419                                  
-   420 00000DDF FA                          cli                                             ; 执行流改变期间禁止时钟中断引发的任务切换
-   421                                  
-   422 00000DE0 0F01F8                      swapgs
-   423 00000DE3 65488B042508000000          mov rax, [gs:8]                                 ; PCB 线性地址
-   424 00000DEC 48C7401002000000            mov qword [rax + 16], 2                         ; 任务状态=终止
-   425 00000DF4 6548C7042500000000-         mov qword [gs:0], 0
-   425 00000DFD 00000000           
-   426 00000E01 65488B242518000000          mov rsp, [gs:24]                                ; 切换到处理器固有栈
-   427 00000E0A 0F01F8                      swapgs
-   428                                  
-   429 00000E0D E8FDFCFFFF                  call search_for_a_ready_task
-   430 00000E12 4D09DB                      or r11, r11 
-   431 00000E15 7405                        jz .sleep                                       ; 未找到就绪任务
-   432                                  
-   433 00000E17 E93DFDFFFF                  jmp resume_execute_a_task                       ; 执行新任务
-   434                                  
-   435                                  .sleep:
-   436 00000E1C 48CF                        iretq
-   437                                  
-   438                                  ; ------------------------------------------------------------
-   439                                  ; create_process
-   440                                  ; 功能: 创建新的任务, 即分配好空间, 创建并填入 PCB
-   441                                  ; 输入: r8=程序的起始逻辑扇区号
-   442                                  ; ------------------------------------------------------------
-   443                                  create_process:
-   444 00000E1E 50                          push rax
-   445 00000E1F 53                          push rbx
-   446 00000E20 51                          push rcx
-   447 00000E21 52                          push rdx
-   448 00000E22 56                          push rsi
-   449 00000E23 57                          push rdi
-   450 00000E24 55                          push rbp
-   451 00000E25 4150                        push r8
-   452 00000E27 4151                        push r9
-   453 00000E29 4152                        push r10
-   454 00000E2B 4153                        push r11
-   455 00000E2D 4154                        push r12
-   456 00000E2F 4155                        push r13
-   457 00000E31 4156                        push r14
-   458 00000E33 4157                        push r15
-   459                                  
-   460                                      ; 在内核空间创建任务控制块 PCB, 来记录任务相关信息, 内核通过任务控制块来跟踪和识别任务, 并对任务进行管理和控制
-   461 00000E35 B900020000                  mov rcx, 512                                    ; 任务控制块 PCB 的尺寸, PCB 的格式见书中 205 图
-   462 00000E3A E855F9FFFF                  call core_memory_allocate                       ; 在内核分配地址
-   463                                  
-   464 00000E3F 4D89EB                      mov r11, r13                                    ; r11 寄存器用来保存 PCB 线性地址
-   465                                  
-   466 00000E42 49C7431800000000            mov qword [r11 + 24], USER_ALLOC_START          ; 填写 PCB 的下一次内存分配时可用线性地址
-   467                                      
-   468                                      ; 从当前的四级头表复制并创建新任务的四级头表
-   469 00000E4A E8E6F9FFFF                  call copy_current_pml4                          ; 在 core_utils64.asm 中实现
-   470 00000E4F 49894338                    mov [r11 + 56], rax                             ; 填写 PCB 的 CR3, 默认 PCD=PWT=0(这两个属性忘记的话可以看看书中 123 页)
-   471                                  
-   472                                      ; 以下，切换到新任务的地址空间，并清空其 4 级头表的前半部分。
-   473                                      ; 我们正在地址空间的高端执行，可正常执行内核代码并访问内核数据，同时，当前使用的栈位于地址空间高端的栈。
-   474 00000E53 410F20DF                    mov r15, cr3                                    ; 保存控制寄存器, 本次是临时切换, 还要再切回来
-   475 00000E57 0F22D8                      mov cr3, rax                                    ; 切换到新四级头表的新地址空间
-   476                                  
-   477                                      ; 清空四级头表的前半部分, 即局部地址
-   478 00000E5A 48C7C000F0FFFF              mov rax, 0xffff_ffff_ffff_f000                  ; 四级头表线性地址, 还是递归映射...
-   479 00000E61 B900010000                  mov rcx, 256
-   480                                  .clsp:
-   481 00000E66 48C70000000000              mov qword [rax], 0
-   482 00000E6D 4883C008                    add rax, 8
-   483 00000E71 E2F3                        loop .clsp
-   484                                  
-   485 00000E73 0F20D8                      mov rax, cr3                                    ; 刷新 TLB
-   486 00000E76 0F22D8                      mov cr3, rax 
-   487                                  
-   488                                      ; 为新任务分配 0 特权级使用的栈空间
-   489 00000E79 B900000100                  mov rcx, 4096 * 16                              ; 在内核地址开辟空间
-   490 00000E7E E811F9FFFF                  call core_memory_allocate
-   491 00000E83 4D897320                    mov [r11 + 32], r14                             ; 填入 PCB 中 RSP0, 满减栈, 所以写入结尾地址
+   396 00000DC4 C3                          ret 
+   397                                  
+   398                                  ; ------------------------------------------------------------
+   399                                  ; terminate_process
+   400                                  ; 功能: 终止当前任务
+   401                                  ; ------------------------------------------------------------
+   402                                  terminate_process:
+   403 00000DC5 48BE00E0FFFF7FFFFF-         mov rsi, LAPIC_START_ADDR
+   403 00000DCE FF                 
+   404 00000DCF C78620030000000001-         mov dword [rsi + 0x320], 0x00010000             ; 屏蔽定时器中断
+   404 00000DD8 00                 
+   405                                  
+   406 00000DD9 FA                          cli                                             ; 执行流改变期间禁止时钟中断引发的任务切换
+   407                                  
+   408 00000DDA 0F01F8                      swapgs
+   409 00000DDD 65488B042508000000          mov rax, [gs:8]                                 ; PCB 线性地址
+   410 00000DE6 48C7401002000000            mov qword [rax + 16], 2                         ; 任务状态=终止
+   411 00000DEE 6548C7042500000000-         mov qword [gs:0], 0
+   411 00000DF7 00000000           
+   412 00000DFB 65488B242518000000          mov rsp, [gs:24]                                ; 切换到处理器固有栈
+   413 00000E04 0F01F8                      swapgs
+   414                                  
+   415 00000E07 E806FDFFFF                  call search_for_a_ready_task
+   416 00000E0C 4D09DB                      or r11, r11 
+   417 00000E0F 7405                        jz .sleep                                       ; 未找到就绪任务
+   418                                  
+   419 00000E11 E946FDFFFF                  jmp resume_execute_a_task                       ; 执行新任务
+   420                                  
+   421                                  .sleep:
+   422 00000E16 48CF                        iretq
+   423                                  
+   424                                  ; ------------------------------------------------------------
+   425                                  ; create_process
+   426                                  ; 功能: 创建新的任务, 即分配好空间, 创建并填入 PCB
+   427                                  ; 输入: r8=程序的起始逻辑扇区号
+   428                                  ; ------------------------------------------------------------
+   429                                  create_process:
+   430 00000E18 50                          push rax
+   431 00000E19 53                          push rbx
+   432 00000E1A 51                          push rcx
+   433 00000E1B 52                          push rdx
+   434 00000E1C 56                          push rsi
+   435 00000E1D 57                          push rdi
+   436 00000E1E 55                          push rbp
+   437 00000E1F 4150                        push r8
+   438 00000E21 4151                        push r9
+   439 00000E23 4152                        push r10
+   440 00000E25 4153                        push r11
+   441 00000E27 4154                        push r12
+   442 00000E29 4155                        push r13
+   443 00000E2B 4156                        push r14
+   444 00000E2D 4157                        push r15
+   445                                  
+   446                                      ; 在内核空间创建任务控制块 PCB, 来记录任务相关信息, 内核通过任务控制块来跟踪和识别任务, 并对任务进行管理和控制
+   447 00000E2F B900020000                  mov rcx, 512                                    ; 任务控制块 PCB 的尺寸, PCB 的格式见书中 205 图
+   448 00000E34 E85BF9FFFF                  call core_memory_allocate                       ; 在内核分配地址
+   449                                  
+   450 00000E39 4D89EB                      mov r11, r13                                    ; r11 寄存器用来保存 PCB 线性地址
+   451                                  
+   452 00000E3C 49C7431800000000            mov qword [r11 + 24], USER_ALLOC_START          ; 填写 PCB 的下一次内存分配时可用线性地址
+   453                                      
+   454                                      ; 从当前的四级头表复制并创建新任务的四级头表
+   455 00000E44 E8ECF9FFFF                  call copy_current_pml4                          ; 在 core_utils64.asm 中实现
+   456 00000E49 49894338                    mov [r11 + 56], rax                             ; 填写 PCB 的 CR3, 默认 PCD=PWT=0(这两个属性忘记的话可以看看书中 123 页)
+   457                                  
+   458                                      ; 以下，切换到新任务的地址空间，并清空其 4 级头表的前半部分。
+   459                                      ; 我们正在地址空间的高端执行，可正常执行内核代码并访问内核数据，同时，当前使用的栈位于地址空间高端的栈。
+   460 00000E4D 410F20DF                    mov r15, cr3                                    ; 保存控制寄存器, 本次是临时切换, 还要再切回来
+   461 00000E51 0F22D8                      mov cr3, rax                                    ; 切换到新四级头表的新地址空间
+   462                                  
+   463                                      ; 清空四级头表的前半部分, 即局部地址
+   464 00000E54 48C7C000F0FFFF              mov rax, 0xffff_ffff_ffff_f000                  ; 四级头表线性地址, 还是递归映射...
+   465 00000E5B B900010000                  mov rcx, 256
+   466                                  .clsp:
+   467 00000E60 48C70000000000              mov qword [rax], 0
+   468 00000E67 4883C008                    add rax, 8
+   469 00000E6B E2F3                        loop .clsp
+   470                                  
+   471 00000E6D 0F20D8                      mov rax, cr3                                    ; 刷新 TLB
+   472 00000E70 0F22D8                      mov cr3, rax 
+   473                                  
+   474                                      ; 为新任务分配 0 特权级使用的栈空间
+   475 00000E73 B900000100                  mov rcx, 4096 * 16                              ; 在内核地址开辟空间
+   476 00000E78 E817F9FFFF                  call core_memory_allocate
+   477 00000E7D 4D897320                    mov [r11 + 32], r14                             ; 填入 PCB 中 RSP0, 满减栈, 所以写入结尾地址
+   478                                  
+   479                                      ; 为新任务分配 3 特权级使用的栈空间
+   480 00000E81 B900000100                  mov rcx, 4096 * 16                              ; 在用户地址开辟空间
+   481 00000E86 E85EF9FFFF                  call user_memory_allocate
+   482 00000E8B 4D897378                    mov [r11 + 120], r14                            ; 填入 PCB 中 RSP
+   483                                  
+   484 00000E8F 49C7431000000000            mov qword [r11 + 16], 0                         ; PCB 中的任务状态填为就绪    
+   485                                  
+   486                                      ; 以下开始加载用户程序
+   487 00000E97 B900020000                  mov rcx, 512                                    ; 在用户空间开辟一个缓冲区
+   488 00000E9C E848F9FFFF                  call user_memory_allocate
+   489 00000EA1 4C89EB                      mov rbx, r13 
+   490 00000EA4 4C89C0                      mov rax, r8                                     ; r8 中存的用户程序起始扇区号         
+   491 00000EA7 E805F3FFFF                  call read_hard_disk_0
    492                                  
-   493                                      ; 为新任务分配 3 特权级使用的栈空间
-   494 00000E87 B900000100                  mov rcx, 4096 * 16                              ; 在用户地址开辟空间
-   495 00000E8C E858F9FFFF                  call user_memory_allocate
-   496 00000E91 4D897378                    mov [r11 + 120], r14                            ; 填入 PCB 中 RSP
+   493 00000EAC 4D896D10                    mov [r13 + 16], r13                             ; 在程序头填写它自己的起始线性地址
+   494 00000EB0 4D89EE                      mov r14, r13 
+   495 00000EB3 4D037508                    add r14, [r13 + 8]
+   496 00000EB7 4D89B3C0000000              mov [r11 + 192], r14                            ; 在 PCB 中登记程序入口的线性地址
    497                                  
-   498 00000E95 49C7431000000000            mov qword [r11 + 16], 0                         ; PCB 中的任务状态填为就绪    
-   499                                  
-   500                                      ; 以下开始加载用户程序
-   501 00000E9D B900020000                  mov rcx, 512                                    ; 在用户空间开辟一个缓冲区
-   502 00000EA2 E842F9FFFF                  call user_memory_allocate
-   503 00000EA7 4C89EB                      mov rbx, r13 
-   504 00000EAA 4C89C0                      mov rax, r8                                     ; r8 中存的用户程序起始扇区号         
-   505 00000EAD E8FFF2FFFF                  call read_hard_disk_0
-   506                                  
-   507 00000EB2 4D896D10                    mov [r13 + 16], r13                             ; 在程序头填写它自己的起始线性地址
-   508 00000EB6 4D89EE                      mov r14, r13 
-   509 00000EB9 4D037508                    add r14, [r13 + 8]
-   510 00000EBD 4D89B3C0000000              mov [r11 + 192], r14                            ; 在 PCB 中登记程序入口的线性地址
-   511                                  
-   512                                      ; 以下读取程序剩下代码
-   513 00000EC4 498B4D00                    mov rcx, [r13]                                  ; 程序尺寸(在程序头部记录)
-   514 00000EC8 48F7C1FF010000              test rcx, 0x1ff                                 ; 能被 512 整除吗?
-   515 00000ECF 740F                        jz .y512
-   516 00000ED1 48C1E909                    shr rcx, 9                                      ; 不能就凑整
-   517 00000ED5 48C1E109                    shl rcx, 9
-   518 00000ED9 4881C100020000              add rcx, 512
-   519                                  .y512:
-   520 00000EE0 4881E900020000              sub rcx, 512                                    ; 减去已读一个扇区的长度
-   521 00000EE7 7416                        jz .rdok 
-   522 00000EE9 E8FBF8FFFF                  call user_memory_allocate                       ; 先分配内存在读数据
-   523 00000EEE 48C1E909                    shr rcx, 9                                      ; 除以 512, 计算还需要读的扇区数
-   524 00000EF2 48FFC0                      inc rax                                         ; 起始扇区号
-   525                                  .b1:
-   526 00000EF5 E8B7F2FFFF                  call read_hard_disk_0
-   527 00000EFA 48FFC0                      inc rax 
-   528 00000EFD E2F6                        loop .b1 
+   498                                      ; 以下读取程序剩下代码
+   499 00000EBE 498B4D00                    mov rcx, [r13]                                  ; 程序尺寸(在程序头部记录)
+   500 00000EC2 48F7C1FF010000              test rcx, 0x1ff                                 ; 能被 512 整除吗?
+   501 00000EC9 740F                        jz .y512
+   502 00000ECB 48C1E909                    shr rcx, 9                                      ; 不能就凑整
+   503 00000ECF 48C1E109                    shl rcx, 9
+   504 00000ED3 4881C100020000              add rcx, 512
+   505                                  .y512:
+   506 00000EDA 4881E900020000              sub rcx, 512                                    ; 减去已读一个扇区的长度
+   507 00000EE1 7416                        jz .rdok 
+   508 00000EE3 E801F9FFFF                  call user_memory_allocate                       ; 先分配内存在读数据
+   509 00000EE8 48C1E909                    shr rcx, 9                                      ; 除以 512, 计算还需要读的扇区数
+   510 00000EEC 48FFC0                      inc rax                                         ; 起始扇区号
+   511                                  .b1:
+   512 00000EEF E8BDF2FFFF                  call read_hard_disk_0
+   513 00000EF4 48FFC0                      inc rax 
+   514 00000EF7 E2F6                        loop .b1 
+   515                                  
+   516                                  .rdok:
+   517 00000EF9 49C783C80000003B00-         mov qword [r11 + 200], USER_CODE64_SEL          ; 填写 PCB 中代码段选择子
+   517 00000F02 0000               
+   518 00000F04 49C783D00000003300-         mov qword [r11 + 208], USER_STACK64_SEL         ; 填写 PCB 中栈段选择子
+   518 00000F0D 0000               
+   519                                  
+   520 00000F0F 9C                          pushfq
+   521 00000F10 418F83E8000000              pop qword [r11 + 232]                           ; 填写 PCB 中 RFLAGS
+   522                                  
+   523 00000F17 49C783F00000003700-         mov qword [r11 + 240], SUGG_PREEM_SLICE         ; 推荐的执行时间片
+   523 00000F20 0000               
+   524                                  
+   525 00000F22 E8CFF9FFFF                  call generate_process_id
+   526 00000F27 49894308                    mov [r11 + 8], rax                              ; 填入 PCB 中当前任务标识
+   527                                  
+   528 00000F2B E815FEFFFF                  call append_to_pcb_link                         ; 将 PCB 添加到进程控制链表尾部
    529                                  
-   530                                  .rdok:
-   531 00000EFF 49C783C80000003B00-         mov qword [r11 + 200], USER_CODE64_SEL          ; 填写 PCB 中代码段选择子
-   531 00000F08 0000               
-   532 00000F0A 49C783D00000003300-         mov qword [r11 + 208], USER_STACK64_SEL         ; 填写 PCB 中栈段选择子
-   532 00000F13 0000               
-   533                                  
-   534 00000F15 9C                          pushfq
-   535 00000F16 418F83E8000000              pop qword [r11 + 232]                           ; 填写 PCB 中 RFLAGS
-   536                                  
-   537 00000F1D 49C783F00000003700-         mov qword [r11 + 240], SUGG_PREEM_SLICE         ; 推荐的执行时间片
-   537 00000F26 0000               
-   538                                  
-   539 00000F28 E8C9F9FFFF                  call generate_process_id
-   540 00000F2D 49894308                    mov [r11 + 8], rax                              ; 填入 PCB 中当前任务标识
-   541                                  
-   542 00000F31 E815FEFFFF                  call append_to_pcb_link                         ; 将 PCB 添加到进程控制链表尾部
-   543                                  
-   544 00000F36 410F22DF                    mov cr3, r15                                    ; 切换到原任务地址空间
-   545                                  
-   546 00000F3A 48BE00E0FFFF7FFFFF-         mov rsi, LAPIC_START_ADDR                       ; Local APIC 的线性地址
-   546 00000F43 FF                 
-   547 00000F44 C78610030000000000-         mov dword [rsi + 0x310], 0
-   547 00000F4D 00                 
-   548 00000F4E C78600030000FE4008-         mov dword [rsi + 0x300], 0x000840fe             ; 向所有处理器发送任务认领中断
-   548 00000F57 00                 
-   549                                  
-   550 00000F58 415F                        pop r15
-   551 00000F5A 415E                        pop r14
-   552 00000F5C 415D                        pop r13
-   553 00000F5E 415C                        pop r12
-   554 00000F60 415B                        pop r11
-   555 00000F62 415A                        pop r10
-   556 00000F64 4159                        pop r9
-   557 00000F66 4158                        pop r8
-   558 00000F68 5D                          pop rbp
-   559 00000F69 5F                          pop rdi
-   560 00000F6A 5E                          pop rsi
-   561 00000F6B 5A                          pop rdx
-   562 00000F6C 59                          pop rcx
-   563 00000F6D 5B                          pop rbx
-   564 00000F6E 58                          pop rax
-   565                                  
-   566 00000F6F C3                          ret
-   567                                  ; ------------------------------------------------------------
-   568                                  ; syscall_procedure
-   569                                  ; 功能: 系统调用的处理过程, 处理器会自动关闭可屏蔽中断
-   570                                  ; 注意: rcx 和 r11 由处理器使用, 保存 rip 和 rflags 的内容; rbp 和 r15 由此例程占用. 如有必要, 请用户程序在调用 syscall 前保存它们, 在系统调用返回后自行恢复.
-   571                                  ; ------------------------------------------------------------
-   572                                  syscall_procedure: 
-   573                                  
-   574 00000F70 0F01F8                      swapgs
-   575 00000F73 654889242500000000          mov [gs:0], rsp                                 ; 保存当前 3 特权级栈指针
-   576 00000F7C 65488B242584000000          mov rsp, [gs:128 + 4],                          ; 使用 TSS 的 RSP0 作为安全栈
-   577 00000F85 65FF342500000000            push qword [gs:0]                               
-   578 00000F8D 0F01F8                      swapgs
-   579 00000F90 FB                          sti                                             ; 准备工作全部完成，中断和任务切换无虞
-   580                                  
-   581 00000F91 4157                        push r15 
-   582 00000F93 4C8B3D(08000000)            mov r15, [rel position]
-   583 00000F9A 4D03BCC7[69020000]          add r15, [r15 + rax * 8 + sys_entry]            ; 得到指定的那个系统调用功能的线性地址
-   584 00000FA2 41FFD7                      call r15
-   585 00000FA5 415F                        pop r15 
+   530 00000F30 410F22DF                    mov cr3, r15                                    ; 切换到原任务地址空间
+   531                                  
+   532 00000F34 48BE00E0FFFF7FFFFF-         mov rsi, LAPIC_START_ADDR                       ; Local APIC 的线性地址
+   532 00000F3D FF                 
+   533 00000F3E C78610030000000000-         mov dword [rsi + 0x310], 0
+   533 00000F47 00                 
+   534 00000F48 C78600030000FE4008-         mov dword [rsi + 0x300], 0x000840fe             ; 向所有处理器发送任务认领中断
+   534 00000F51 00                 
+   535                                  
+   536 00000F52 415F                        pop r15
+   537 00000F54 415E                        pop r14
+   538 00000F56 415D                        pop r13
+   539 00000F58 415C                        pop r12
+   540 00000F5A 415B                        pop r11
+   541 00000F5C 415A                        pop r10
+   542 00000F5E 4159                        pop r9
+   543 00000F60 4158                        pop r8
+   544 00000F62 5D                          pop rbp
+   545 00000F63 5F                          pop rdi
+   546 00000F64 5E                          pop rsi
+   547 00000F65 5A                          pop rdx
+   548 00000F66 59                          pop rcx
+   549 00000F67 5B                          pop rbx
+   550 00000F68 58                          pop rax
+   551                                  
+   552 00000F69 C3                          ret
+   553                                  ; ------------------------------------------------------------
+   554                                  ; syscall_procedure
+   555                                  ; 功能: 系统调用的处理过程, 处理器会自动关闭可屏蔽中断
+   556                                  ; 注意: rcx 和 r11 由处理器使用, 保存 rip 和 rflags 的内容; rbp 和 r15 由此例程占用. 如有必要, 请用户程序在调用 syscall 前保存它们, 在系统调用返回后自行恢复.
+   557                                  ; ------------------------------------------------------------
+   558                                  syscall_procedure: 
+   559                                  
+   560 00000F6A 0F01F8                      swapgs
+   561 00000F6D 654889242500000000          mov [gs:0], rsp                                 ; 保存当前 3 特权级栈指针
+   562 00000F76 65488B242584000000          mov rsp, [gs:128 + 4],                          ; 使用 TSS 的 RSP0 作为安全栈
+   563 00000F7F 65FF342500000000            push qword [gs:0]                               
+   564 00000F87 0F01F8                      swapgs
+   565 00000F8A FB                          sti                                             ; 准备工作全部完成，中断和任务切换无虞
+   566                                  
+   567 00000F8B 4157                        push r15 
+   568 00000F8D 4C8B3D(08000000)            mov r15, [rel position]
+   569 00000F94 4D03BCC7[69020000]          add r15, [r15 + rax * 8 + sys_entry]            ; 得到指定的那个系统调用功能的线性地址
+   570 00000F9C 41FFD7                      call r15
+   571 00000F9F 415F                        pop r15 
+   572                                  
+   573 00000FA1 FA                          cli 
+   574 00000FA2 5C                          pop rsp                                         ; 恢复原先的 3 特权级栈指针
+   575 00000FA3 480F07                      o64 sysret
+   576                                  
+   577                                  ; ------------------------------------------------------------
+   578                                  ; init
+   579                                  ; 功能: 初始化内核工作环境
+   580                                  ; ------------------------------------------------------------
+   581                                  init: 
+   582                                      ; 将 GDT 的线性地址映射到虚拟内存高端的相同位置。
+   583                                      ; 处理器不支持 64 位立即数到内存地址的操作, 所以用两条指令完成。
+   584 00000FA6 48B8000001000080FF-         mov rax, UPPER_GDT_LINEAR                       ; GDT 高端线性地址
+   584 00000FAF FF                 
+   585 00000FB0 48890425047E0000            mov qword [SDA_PHY_ADDR + 4], rax
    586                                  
-   587 00000FA7 FA                          cli 
-   588 00000FA8 5C                          pop rsp                                         ; 恢复原先的 3 特权级栈指针
-   589 00000FA9 480F07                      o64 sysret
-   590                                  
-   591                                  ; ------------------------------------------------------------
-   592                                  ; init
-   593                                  ; 功能: 初始化内核工作环境
-   594                                  ; ------------------------------------------------------------
-   595                                  init: 
-   596                                      ; 将 GDT 的线性地址映射到虚拟内存高端的相同位置。
-   597                                      ; 处理器不支持 64 位立即数到内存地址的操作, 所以用两条指令完成。
-   598 00000FAC 48B8000001000080FF-         mov rax, UPPER_GDT_LINEAR                       ; GDT 高端线性地址
-   598 00000FB5 FF                 
-   599 00000FB6 48890425047E0000            mov qword [SDA_PHY_ADDR + 4], rax
+   587 00000FB8 0F011425027E0000            lgdt [SDA_PHY_ADDR + 2]                
+   588                                  
+   589                                      ; 将栈映射到高端
+   590                                      ; 64 位模式下不支持源操作数为 64 位立即数的加法操作。
+   591 00000FC0 48B8000000000080FF-         mov rax, UPPER_LINEAR_START
+   591 00000FC9 FF                 
+   592 00000FCA 4801C4                      add rsp, rax 
+   593                                  
+   594                                      ; 准备让处理器从虚拟地址空间的高端开始执行（现在依然在低端执行）
+   595 00000FCD 48B8000000000080FF-         mov rax, UPPER_LINEAR_START
+   595 00000FD6 FF                 
+   596 00000FD7 480105(08000000)            add [rel position], rax                         ; 更新 position 处地址, 采用相对寻址方式
+   597 00000FDE 488B05(08000000)            mov rax, [rel position]
+   598 00000FE5 4805[ED0F0000]              add rax, .to_upper
+   599 00000FEB FFE0                        jmp rax                                         ; 用 jmp 改变 rip
    600                                  
-   601 00000FBE 0F011425027E0000            lgdt [SDA_PHY_ADDR + 2]                
-   602                                  
-   603                                      ; 将栈映射到高端
-   604                                      ; 64 位模式下不支持源操作数为 64 位立即数的加法操作。
-   605 00000FC6 48B8000000000080FF-         mov rax, UPPER_LINEAR_START
-   605 00000FCF FF                 
-   606 00000FD0 4801C4                      add rsp, rax 
-   607                                  
-   608                                      ; 准备让处理器从虚拟地址空间的高端开始执行（现在依然在低端执行）
-   609 00000FD3 48B8000000000080FF-         mov rax, UPPER_LINEAR_START
-   609 00000FDC FF                 
-   610 00000FDD 480105(08000000)            add [rel position], rax                         ; 更新 position 处地址, 采用相对寻址方式
-   611 00000FE4 488B05(08000000)            mov rax, [rel position]
-   612 00000FEB 4805[F30F0000]              add rax, .to_upper
-   613 00000FF1 FFE0                        jmp rax                                         ; 用 jmp 改变 rip
-   614                                  
-   615                                  .to_upper:
-   616                                      ; 接下来初始化中断描述符表 IDT，并为 32 个异常以及 224 个中断安装门描述符
-   617                                  
-   618                                      ; 为 32 个异常创建通用处理过程的中断门
-   619 00000FF3 4C8B0D(08000000)            mov r9, [rel position]
-   620 00000FFA 498D81[D90A0000]            lea rax, [r9 + general_exception_handler]
-   621 00001001 E823F1FFFF                  call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
-   622                                  
-   623 00001006 4D31C0                      xor r8, r8  
-   624                                  .idt0:                                              ; 32 个异常
-   625 00001009 E860F1FFFF                  call mount_idt_entry                            ; 在 core_utils64.asm 中实现
-   626 0000100E 49FFC0                      inc r8 
-   627 00001011 4983F81F                    cmp r8, 31 
-   628 00001015 7EF2                        jle .idt0
-   629                                  
-   630                                      ; 创建并安装中断门
-   631 00001017 498D81[D70A0000]            lea rax, [r9 + general_interrupt_handler]       
-   632 0000101E E806F1FFFF                  call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
+   601                                  .to_upper:
+   602                                      ; 接下来初始化中断描述符表 IDT，并为 32 个异常以及 224 个中断安装门描述符
+   603                                  
+   604                                      ; 为 32 个异常创建通用处理过程的中断门
+   605 00000FED 4C8B0D(08000000)            mov r9, [rel position]
+   606 00000FF4 498D81[DC0A0000]            lea rax, [r9 + general_exception_handler]
+   607 00000FFB E829F1FFFF                  call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
+   608                                  
+   609 00001000 4D31C0                      xor r8, r8  
+   610                                  .idt0:                                              ; 32 个异常
+   611 00001003 E866F1FFFF                  call mount_idt_entry                            ; 在 core_utils64.asm 中实现
+   612 00001008 49FFC0                      inc r8 
+   613 0000100B 4983F81F                    cmp r8, 31 
+   614 0000100F 7EF2                        jle .idt0
+   615                                  
+   616                                      ; 创建并安装中断门
+   617 00001011 498D81[DA0A0000]            lea rax, [r9 + general_interrupt_handler]       
+   618 00001018 E80CF1FFFF                  call make_interrupt_gate                        ; 在 core_utils64.asm 中实现
+   619                                  
+   620 0000101D 41B820000000                mov r8, 32 
+   621                                  .idt1:
+   622 00001023 E846F1FFFF                  call mount_idt_entry                            ; 在 core_utils64.asm 中实现
+   623 00001028 49FFC0                      inc r8 
+   624 0000102B 4981F8FF000000              cmp r8, 255
+   625 00001032 7EEF                        jle .idt1
+   626                                  
+   627 00001034 48B800E000000080FF-         mov rax, UPPER_IDT_LINEAR                       ; 中断描述符表 IDT 的高端线性地址
+   627 0000103D FF                 
+   628 0000103E 48BB007E00000080FF-         mov rbx, UPPER_SDA_LINEAR                       ; 系统数据区 SDA 的高端线性地址
+   628 00001047 FF                 
+   629 00001048 66C7430CFF0F                mov word [rbx + 0x0c], 256 * 16 - 1
+   630 0000104E 4889430E                    mov qword [rbx + 0x0e], rax                     ; 将 IDT 的线性地址和界限写入内核空间保存
+   631                                  
+   632 00001052 0F015B0C                    lidt [rbx + 0x0c]                               ; 加载 IDT
    633                                  
-   634 00001023 41B820000000                mov r8, 32 
-   635                                  .idt1:
-   636 00001029 E840F1FFFF                  call mount_idt_entry                            ; 在 core_utils64.asm 中实现
-   637 0000102E 49FFC0                      inc r8 
-   638 00001031 4981F8FF000000              cmp r8, 255
-   639 00001038 7EEF                        jle .idt1
-   640                                  
-   641 0000103A 48B800E000000080FF-         mov rax, UPPER_IDT_LINEAR                       ; 中断描述符表 IDT 的高端线性地址
-   641 00001043 FF                 
-   642 00001044 48BB007E00000080FF-         mov rbx, UPPER_SDA_LINEAR                       ; 系统数据区 SDA 的高端线性地址
-   642 0000104D FF                 
-   643 0000104E 66C7430CFF0F                mov word [rbx + 0x0c], 256 * 16 - 1
-   644 00001054 4889430E                    mov qword [rbx + 0x0e], rax                     ; 将 IDT 的线性地址和界限写入内核空间保存
-   645                                  
-   646 00001058 0F015B0C                    lidt [rbx + 0x0c]                               ; 加载 IDT
-   647                                  
-   648 0000105C B0FF                        mov al, 0xff                                    ; 屏蔽所有发往 8259A 主芯片的中断信号
-   649 0000105E E621                        out 0x21, al                                    ; 多处理器下不再使用 8259 芯片
+   634 00001056 B0FF                        mov al, 0xff                                    ; 屏蔽所有发往 8259A 主芯片的中断信号
+   635 00001058 E621                        out 0x21, al                                    ; 多处理器下不再使用 8259 芯片
+   636                                  
+   637                                      ; 在 64 位模式下显示的第一条信息!
+   638 0000105A 4C8B3D(08000000)            mov r15, [rel position]
+   639 00001061 498D9F[36010000]            lea rbx, [r15 + welcome]
+   640 00001068 E893EFFFFF                  call put_string64                               ; 在 core_utils64.asm 中实现
+   641                                  
+   642                                      ; 安装系统服务(syscall, sysret)所需的代码段和栈段描述符
+   643 0000106D 49BF007E00000080FF-         mov r15, UPPER_SDA_LINEAR                       ; 系统数据区 SDA 的线性地址
+   643 00001076 FF                 
+   644 00001077 4831DB                      xor rbx, rbx 
+   645 0000107A 66418B5F02                  mov bx, [r15 + 2]                               ; 得到 GDT 界限值(表的总字节数 - 1 == 下标)
+   646 0000107F 66FFC3                      inc bx 
+   647 00001082 49035F04                    add rbx, [r15 + 4]                              ; GDT 基址 + GDT 界限值 + 1 == 新描述符的地址
+   648                                                          
+   649                                      ; 增加新的描述符, 这里可以看书中 182 页的图, 将之前设置的四个描述符也画全了
    650                                  
-   651                                      ; 在 64 位模式下显示的第一条信息!
-   652 00001060 4C8B3D(08000000)            mov r15, [rel position]
-   653 00001067 498D9F[36010000]            lea rbx, [r15 + welcome]
-   654 0000106E E88DEFFFFF                  call put_string64                               ; 在 core_utils64.asm 中实现
-   655                                  
-   656                                      ; 安装系统服务(syscall, sysret)所需的代码段和栈段描述符
-   657 00001073 49BF007E00000080FF-         mov r15, UPPER_SDA_LINEAR                       ; 系统数据区 SDA 的线性地址
-   657 0000107C FF                 
-   658 0000107D 4831DB                      xor rbx, rbx 
-   659 00001080 66418B5F02                  mov bx, [r15 + 2]                               ; 得到 GDT 界限值(表的总字节数 - 1 == 下标)
-   660 00001085 66FFC3                      inc bx 
-   661 00001088 49035F04                    add rbx, [r15 + 4]                              ; GDT 基址 + GDT 界限值 + 1 == 新描述符的地址
-   662                                                          
-   663                                      ; 增加新的描述符, 这里可以看书中 182 页的图, 将之前设置的四个描述符也画全了
-   664                                  
-   665                                      ; 创建 4# 描述符, 栈/数据段描述符, DPL= 0
-   666 0000108C C703FFFF0000                mov dword [rbx], 0x0000ffff
-   667 00001092 C743040092CF00              mov dword [rbx + 4], 0x00cf9200                
-   668                                      ; 创建 5# 描述符, 兼容模式下代码段描述符, 暂不支持, 位置保留, 设为全 0
-   669 00001099 C7430800000000              mov dword [rbx + 8], 0  
-   670 000010A0 C7430C00000000              mov dword [rbx + 12], 0
-   671                                      ; 创建 6# 描述符, 栈/数据段描述符, DPL= 3
-   672 000010A7 C74310FFFF0000              mov dword [rbx + 16], 0x0000ffff
-   673 000010AE C7431400F2CF00              mov dword [rbx + 20], 0x00cff200
-   674                                      ; 创建 7# 描述符, 64 位模式的代码段描述符, DPL= 3
-   675 000010B5 C74318FFFF0000              mov dword [rbx + 24], 0x0000ffff
-   676 000010BC C7431C00F8AF00              mov dword [rbx + 28], 0x00aff800
-   677                                  
-   678                                      ; 我们为每个逻辑处理器都准备一个专属数据区, 它是由每个处理器的 GS 所指向的。
-   679                                      ; 为当前处理器(BSP)准备专属数据区, 设置 GS 并安装任务状态段 TSS 的描述符
-   680                                      ; 详情见书中 348 页
-   681 000010C3 B900010000                  mov rcx, 256                                    ; 专属数据区长度
-   682 000010C8 E8C7F6FFFF                  call core_memory_allocate                       ; 在 core_utils64.asm 中实现
-   683 000010CD 49C7450800000000            mov qword [r13 + 8], 0                          ; 当前任务的 PCB 指针, 初始化为 0
-   684 000010D5 49C7451000000000            mov qword [r13 + 16], 0                         ; 将当前的处理器编号设置为 #0
-   685 000010DD 49896518                    mov [r13 + 24], rsp                             ; 当前处理器的专属栈
-   686 000010E1 498D8580000000              lea rax, [r13 + 128]                            ; TSS 开始于专属数据区内偏移为 128 的地方
-   687 000010E8 E858F0FFFF                  call make_tss_descriptor
-   688 000010ED 48897320                    mov qword [rbx + 32], rsi                       ; TSS 描述符的低 64 位
-   689 000010F1 48897B28                    mov qword [rbx + 40], rdi                       ; TSS 描述符的高 64 位
-   690                                  
-   691 000010F5 664183470230                add word [r15 + 2], 48                          ; 更新 GDT 的边界值, 48 是四个段描述符和一个 TSS 描述符的字节数
-   692 000010FB 410F015702                  lgdt [r15 + 2]
-   693                                  
-   694 00001100 66B94000                    mov cx, 0x0040                                  ; TSS 描述符选择子
-   695 00001104 0F00D9                      ltr cx                                          ; 使用 ltr 指令加载 TSS 选择子
-   696                                  
-   697                                      ; 将处理器专属数据区首地址保存到当前处理器的型号专属寄存器 IA32_KERNEL_GS_BASE
-   698 00001107 B9020100C0                  mov ecx, 0xc000_0102                            ; IA32_KERNEL_GS_BASE
-   699 0000110C 4C89E8                      mov rax, r13                                    ; 只用 eax
-   700 0000110F 4C89EA                      mov rdx, r13 
-   701 00001112 48C1EA20                    shr rdx, 32                                     ; 只用 edx
-   702 00001116 0F30                        wrmsr
-   703                                  
-   704                                      ; 为快速系统调用 syscall 和 sysret 准备参数, 详细见书中 180-185
-   705 00001118 B9800000C0                  mov ecx, 0x0c0000080                            ; 指定型号专属寄存器 IA32_EFER
-   706 0000111D 0F32                        rdmsr
-   707 0000111F 0FBAE800                    bts eax, 0                                      ; 置位 SCE 位, 允许 syscall 和 sysret
-   708 00001123 0F30                        wrmsr
-   709                                  
-   710 00001125 B9810000C0                  mov ecx, 0xc0000081                             ; IA32_STAR, syscall 会自动切换代码段寄存器（CS）到内核态的代码段，其值来自 IA32_STAR
-   711 0000112A BA18002B00                  mov edx, (RESVD_DESC_SEL << 16) | CORE_CODE64_SEL ; 高 32 位, RESVD_DESC_SEL 是用户态代码段选择子（返回用户态时使用）, CORE_CODE64_SEL 是内核态代码段选择子（进入内核态时使用）
-   712 0000112F 31C0                        xor eax, eax                                    ; 低 32 位
-   713 00001131 0F30                        wrmsr                                           
-   714                                  
-   715 00001133 B9820000C0                  mov ecx, 0xc0000082                             ; IA32_LSTAR
-   716 00001138 488B05(08000000)            mov rax, [rel position]
-   717 0000113F 488D80[700F0000]            lea rax, [rax + syscall_procedure]              ; 只用 EAX 部分
-   718 00001146 4889C2                      mov rdx, rax 
-   719 00001149 48C1EA20                    shr rdx, 32                                     ; 只用 EDX 部分
-   720 0000114D 0F30                        wrmsr
-   721                                  
-   722 0000114F B9840000C0                  mov ecx, 0xc0000084                             ; IA32_FMASK
-   723 00001154 31D2                        xor edx, edx 
-   724 00001156 B800770400                  mov eax, 0x00047700                             ; 将 TF, IF, DF, IOPL, AC 清零, 其他保持不变, 可看书 185 页的图
-   725 0000115B 0F30                        wrmsr
-   726                                  
-   727                                      ; 以下初始化高级可编程中断控制器 APIC。在计算机启动后，BIOS已经对 LAPIC 和 IOAPIC 做了
-   728                                      ; 初始化并创建了相关的高级配置和电源管理接口（ACPI）表项。可以从中获取多处理器和
-   729                                      ; APIC 信息。英特尔架构的个人计算机（IA-PC）从 1MB 物理内存中搜索获取；启用可扩展固件
-   730                                      ; 接口（EFI或者叫UEFI）的计算机需使用 EFI 传递的 EFI 系统表指针定位相关表格并从中获取
-   731                                      ; 多处理器和 APIC 信息。为简单起见，我们采用前一种传统的方式。请注意虚拟机的配置！
-   732                                  
-   733                                      ; ACPI 申领的内存区域已经保存在我们的系统数据区（SDA），以下将其读出。此内存区可能
-   734                                      ; 位于分页系统尚未映射的部分，故以下先将这部分内存进行一一映射（线性地址=物理地址）
-   735 0000115D 66833C25167E000000          cmp word [SDA_PHY_ADDR + 0x16], 0               ; 检查检查地址范围描述结构的数量是否为 0
-   736 00001166 7411                        jz .acpi_err                                    ; 除非 bios 不支持 acpi, 否则不会是 0
-   737 00001168 BE187E0000                  mov rsi, SDA_PHY_ADDR + 0x18                    ; 系统数据区, 地址范围描述结构的起始地址
-   738                                  .looking:
-   739 0000116D 837E1003                    cmp dword [rsi + 16], 3                         ; 3 代表是 ACPI 申领的内存, ACPI 的介绍可以看书中 257 页
-   740 00001171 741B                        jz .looked
-   741 00001173 4883C620                    add rsi, 32                                     ; 每个地址范围描述结构的长度
-   742 00001177 E2F4                        loop .looking
-   743                                  
-   744                                  .acpi_err:
-   745 00001179 4C8B3D(08000000)            mov r15, [rel position]
-   746 00001180 498D9F[00000000]            lea rbx, [r15 + acpi_error]
-   747 00001187 E852EFFFFF                  call put_cstringxy64
-   748 0000118C FA                          cli 
-   749 0000118D F4                          hlt 
-   750                                  
-   751                                  .looked:
-   752 0000118E 488B1E                      mov rbx, [rsi]                                  ; ACPI 申领的起始物理地址
-   753 00001191 488B4E08                    mov rcx, [rsi + 8]                              ; ACPI 申领的内存大小, 以字节计
-   754 00001195 4801D9                      add rcx, rbx                                    ; ACPI 申领的内存上边界
-   755 00001198 48C7C200F0FFFF              mov rdx, 0xffff_ffff_ffff_f000                  ; 用于生成页地址的掩码
+   651                                      ; 创建 4# 描述符, 栈/数据段描述符, DPL= 0
+   652 00001086 C703FFFF0000                mov dword [rbx], 0x0000ffff
+   653 0000108C C743040092CF00              mov dword [rbx + 4], 0x00cf9200                
+   654                                      ; 创建 5# 描述符, 兼容模式下代码段描述符, 暂不支持, 位置保留, 设为全 0
+   655 00001093 C7430800000000              mov dword [rbx + 8], 0  
+   656 0000109A C7430C00000000              mov dword [rbx + 12], 0
+   657                                      ; 创建 6# 描述符, 栈/数据段描述符, DPL= 3
+   658 000010A1 C74310FFFF0000              mov dword [rbx + 16], 0x0000ffff
+   659 000010A8 C7431400F2CF00              mov dword [rbx + 20], 0x00cff200
+   660                                      ; 创建 7# 描述符, 64 位模式的代码段描述符, DPL= 3
+   661 000010AF C74318FFFF0000              mov dword [rbx + 24], 0x0000ffff
+   662 000010B6 C7431C00F8AF00              mov dword [rbx + 28], 0x00aff800
+   663                                  
+   664                                      ; 我们为每个逻辑处理器都准备一个专属数据区, 它是由每个处理器的 GS 所指向的。
+   665                                      ; 为当前处理器(BSP)准备专属数据区, 设置 GS 并安装任务状态段 TSS 的描述符
+   666                                      ; 详情见书中 348 页
+   667 000010BD B900010000                  mov rcx, 256                                    ; 专属数据区长度
+   668 000010C2 E8CDF6FFFF                  call core_memory_allocate                       ; 在 core_utils64.asm 中实现
+   669 000010C7 49C7450800000000            mov qword [r13 + 8], 0                          ; 当前任务的 PCB 指针, 初始化为 0
+   670 000010CF 49C7451000000000            mov qword [r13 + 16], 0                         ; 将当前的处理器编号设置为 #0
+   671 000010D7 49896518                    mov [r13 + 24], rsp                             ; 当前处理器的专属栈
+   672 000010DB 498D8580000000              lea rax, [r13 + 128]                            ; TSS 开始于专属数据区内偏移为 128 的地方
+   673 000010E2 E85EF0FFFF                  call make_tss_descriptor
+   674 000010E7 48897320                    mov qword [rbx + 32], rsi                       ; TSS 描述符的低 64 位
+   675 000010EB 48897B28                    mov qword [rbx + 40], rdi                       ; TSS 描述符的高 64 位
+   676                                  
+   677 000010EF 664183470230                add word [r15 + 2], 48                          ; 更新 GDT 的边界值, 48 是四个段描述符和一个 TSS 描述符的字节数
+   678 000010F5 410F015702                  lgdt [r15 + 2]
+   679                                  
+   680 000010FA 66B94000                    mov cx, 0x0040                                  ; TSS 描述符选择子
+   681 000010FE 0F00D9                      ltr cx                                          ; 使用 ltr 指令加载 TSS 选择子
+   682                                  
+   683                                      ; 将处理器专属数据区首地址保存到当前处理器的型号专属寄存器 IA32_KERNEL_GS_BASE
+   684 00001101 B9020100C0                  mov ecx, 0xc000_0102                            ; IA32_KERNEL_GS_BASE
+   685 00001106 4C89E8                      mov rax, r13                                    ; 只用 eax
+   686 00001109 4C89EA                      mov rdx, r13 
+   687 0000110C 48C1EA20                    shr rdx, 32                                     ; 只用 edx
+   688 00001110 0F30                        wrmsr
+   689                                  
+   690                                      ; 为快速系统调用 syscall 和 sysret 准备参数, 详细见书中 180-185
+   691 00001112 B9800000C0                  mov ecx, 0x0c0000080                            ; 指定型号专属寄存器 IA32_EFER
+   692 00001117 0F32                        rdmsr
+   693 00001119 0FBAE800                    bts eax, 0                                      ; 置位 SCE 位, 允许 syscall 和 sysret
+   694 0000111D 0F30                        wrmsr
+   695                                  
+   696 0000111F B9810000C0                  mov ecx, 0xc0000081                             ; IA32_STAR, syscall 会自动切换代码段寄存器（CS）到内核态的代码段，其值来自 IA32_STAR
+   697 00001124 BA18002B00                  mov edx, (RESVD_DESC_SEL << 16) | CORE_CODE64_SEL ; 高 32 位, RESVD_DESC_SEL 是用户态代码段选择子（返回用户态时使用）, CORE_CODE64_SEL 是内核态代码段选择子（进入内核态时使用）
+   698 00001129 31C0                        xor eax, eax                                    ; 低 32 位
+   699 0000112B 0F30                        wrmsr                                           
+   700                                  
+   701 0000112D B9820000C0                  mov ecx, 0xc0000082                             ; IA32_LSTAR
+   702 00001132 488B05(08000000)            mov rax, [rel position]
+   703 00001139 488D80[6A0F0000]            lea rax, [rax + syscall_procedure]              ; 只用 EAX 部分
+   704 00001140 4889C2                      mov rdx, rax 
+   705 00001143 48C1EA20                    shr rdx, 32                                     ; 只用 EDX 部分
+   706 00001147 0F30                        wrmsr
+   707                                  
+   708 00001149 B9840000C0                  mov ecx, 0xc0000084                             ; IA32_FMASK
+   709 0000114E 31D2                        xor edx, edx 
+   710 00001150 B800770400                  mov eax, 0x00047700                             ; 将 TF, IF, DF, IOPL, AC 清零, 其他保持不变, 可看书 185 页的图
+   711 00001155 0F30                        wrmsr
+   712                                  
+   713                                      ; 以下初始化高级可编程中断控制器 APIC。在计算机启动后，BIOS已经对 LAPIC 和 IOAPIC 做了
+   714                                      ; 初始化并创建了相关的高级配置和电源管理接口（ACPI）表项。可以从中获取多处理器和
+   715                                      ; APIC 信息。英特尔架构的个人计算机（IA-PC）从 1MB 物理内存中搜索获取；启用可扩展固件
+   716                                      ; 接口（EFI或者叫UEFI）的计算机需使用 EFI 传递的 EFI 系统表指针定位相关表格并从中获取
+   717                                      ; 多处理器和 APIC 信息。为简单起见，我们采用前一种传统的方式。请注意虚拟机的配置！
+   718                                  
+   719                                      ; ACPI 申领的内存区域已经保存在我们的系统数据区（SDA），以下将其读出。此内存区可能
+   720                                      ; 位于分页系统尚未映射的部分，故以下先将这部分内存进行一一映射（线性地址=物理地址）
+   721 00001157 66833C25167E000000          cmp word [SDA_PHY_ADDR + 0x16], 0               ; 检查检查地址范围描述结构的数量是否为 0
+   722 00001160 7411                        jz .acpi_err                                    ; 除非 bios 不支持 acpi, 否则不会是 0
+   723 00001162 BE187E0000                  mov rsi, SDA_PHY_ADDR + 0x18                    ; 系统数据区, 地址范围描述结构的起始地址
+   724                                  .looking:
+   725 00001167 837E1003                    cmp dword [rsi + 16], 3                         ; 3 代表是 ACPI 申领的内存, ACPI 的介绍可以看书中 257 页
+   726 0000116B 741B                        jz .looked
+   727 0000116D 4883C620                    add rsi, 32                                     ; 每个地址范围描述结构的长度
+   728 00001171 E2F4                        loop .looking
+   729                                  
+   730                                  .acpi_err:
+   731 00001173 4C8B3D(08000000)            mov r15, [rel position]
+   732 0000117A 498D9F[00000000]            lea rbx, [r15 + acpi_error]
+   733 00001181 E87AEEFFFF                  call put_string64
+   734 00001186 FA                          cli 
+   735 00001187 F4                          hlt 
+   736                                  
+   737                                  .looked:
+   738 00001188 488B1E                      mov rbx, [rsi]                                  ; ACPI 申领的起始物理地址
+   739 0000118B 488B4E08                    mov rcx, [rsi + 8]                              ; ACPI 申领的内存大小, 以字节计
+   740 0000118F 4801D9                      add rcx, rbx                                    ; ACPI 申领的内存上边界
+   741 00001192 48C7C200F0FFFF              mov rdx, 0xffff_ffff_ffff_f000                  ; 用于生成页地址的掩码
+   742                                  
+   743                                  .mapping:
+   744 00001199 4989DD                      mov r13, rbx                                    ; 映射的线性地址
+   745 0000119C 4889D8                      mov rax, rbx 
+   746 0000119F 4821D0                      and rax, rdx 
+   747 000011A2 4883C807                    or rax, 0x07                                    ; 将地址设置上属性
+   748 000011A6 E8CDF5FFFF                  call mapping_laddr_to_page
+   749 000011AB 4881C300100000              add rbx, 0x1000
+   750 000011B2 4839CB                      cmp rbx, rcx 
+   751 000011B5 7EE2                        jle .mapping
+   752                                  
+   753                                      ; 从物理地址 0x60000(常规内存顶端) 开始, 搜索系统描述指针结构(RSDP)
+   754 000011B7 BB00000600                  mov rbx, 0x60000
+   755 000011BC 48B952534420505452-         mov rcx, "RSD PTR "                             ; 结构起始标记
+   755 000011C5 20                 
    756                                  
-   757                                  .mapping:
-   758 0000119F 4989DD                      mov r13, rbx                                    ; 映射的线性地址
-   759 000011A2 4889D8                      mov rax, rbx 
-   760 000011A5 4821D0                      and rax, rdx 
-   761 000011A8 4883C807                    or rax, 0x07                                    ; 将地址设置上属性
-   762 000011AC E8C7F5FFFF                  call mapping_laddr_to_page
-   763 000011B1 4881C300100000              add rbx, 0x1000
-   764 000011B8 4839CB                      cmp rbx, rcx 
-   765 000011BB 7EE2                        jle .mapping
-   766                                  
-   767                                      ; 从物理地址 0x60000(常规内存顶端) 开始, 搜索系统描述指针结构(RSDP)
-   768 000011BD BB00000600                  mov rbx, 0x60000
-   769 000011C2 48B952534420505452-         mov rcx, "RSD PTR "                             ; 结构起始标记
-   769 000011CB 20                 
-   770                                  
-   771                                  .searc:
-   772 000011CC 48390B                      cmp qword [rbx], rcx
-   773 000011CF 740F                        je .finda 
-   774 000011D1 4883C310                    add rbx, 16                                     ; 结构的标记位于 16 字节边界处, 也就是说可以以 16 字节为单位搜索
-   775 000011D5 4881FBF0FF0F00              cmp rbx, 0xffff0                                ; 搜索上边界
-   776 000011DC 7CEE                        jl .searc 
-   777 000011DE EB99                        jmp .acpi_err                                   ; 未找到 RSDP, 报错停机
-   778                                  
-   779                                  .finda:
-   780                                      ; RSDT 和 XSDT 都指向 MADT, 但 RSDT 给出的是 32 位物理地址, 而 XDST 给出 64 位物理地址。
-   781                                      ; 只有 VCPI 2.0 及更高版本才有 XSDT。典型地, VBox 支持 ACPI 2.0 而 Bochs 仅支持 1.0
-   782                                      ; 这个可以看书中 274 往后的几个图
-   783 000011E0 807B0F02                    cmp byte [rbx + 15], 2                          ; 检测 ACPI 的版本是否为 2
-   784 000011E4 752B                        jne .acpi_1
-   785 000011E6 488B5B18                    mov rbx, [rbx + 24]                             ; 得到扩展的系统描述表 XSDT 的物理地址
+   757                                  .searc:
+   758 000011C6 48390B                      cmp qword [rbx], rcx
+   759 000011C9 740F                        je .finda 
+   760 000011CB 4883C310                    add rbx, 16                                     ; 结构的标记位于 16 字节边界处, 也就是说可以以 16 字节为单位搜索
+   761 000011CF 4881FBF0FF0F00              cmp rbx, 0xffff0                                ; 搜索上边界
+   762 000011D6 7CEE                        jl .searc 
+   763 000011D8 EB99                        jmp .acpi_err                                   ; 未找到 RSDP, 报错停机
+   764                                  
+   765                                  .finda:
+   766                                      ; RSDT 和 XSDT 都指向 MADT, 但 RSDT 给出的是 32 位物理地址, 而 XDST 给出 64 位物理地址。
+   767                                      ; 只有 VCPI 2.0 及更高版本才有 XSDT。典型地, VBox 支持 ACPI 2.0 而 Bochs 仅支持 1.0
+   768                                      ; 这个可以看书中 274 往后的几个图
+   769 000011DA 807B0F02                    cmp byte [rbx + 15], 2                          ; 检测 ACPI 的版本是否为 2
+   770 000011DE 752B                        jne .vcpi_1
+   771 000011E0 488B5B18                    mov rbx, [rbx + 24]                             ; 得到扩展的系统描述表 XSDT 的物理地址
+   772                                  
+   773                                      ; 以下开始在 XSDT 中遍历搜索多 APIC 描述符表, 即 MADT
+   774 000011E4 4831FF                      xor rdi, rdi                                    ; 下面要使用 rdi, 尽管 edi 赋值了, 但还是要清空 rdi
+   775 000011E7 8B7B04                      mov edi, [rbx + 4]                              ; 得到 XSDT 长度, 以字节计
+   776 000011EA 4801DF                      add rdi, rbx                                    ; 计算上边界的物理地址
+   777 000011ED 4883C324                    add rbx, 36                                     ; XSDT 尾部数组的物理地址
+   778                                  .madt0:
+   779 000011F1 4C8B1B                      mov r11, [rbx]             
+   780 000011F4 41813B41504943              cmp dword [r11], "APIC"                         ; MADT 表的标记
+   781 000011FB 7436                        je .findm                       
+   782 000011FD 4883C308                    add rbx, 8                                      ; 下一个元素
+   783 00001201 4839FB                      cmp rbx, rdi  
+   784 00001204 7CEB                        jl .madt0
+   785 00001206 E968FFFFFF                  jmp .acpi_err
    786                                  
-   787                                      ; 以下开始在 XSDT 中遍历搜索多 APIC 描述符表, 即 MADT
-   788 000011EA 4831FF                      xor rdi, rdi                                    ; 下面要使用 rdi, 尽管 edi 赋值了, 但还是要清空 rdi
-   789 000011ED 8B7B04                      mov edi, [rbx + 4]                              ; 得到 XSDT 长度, 以字节计
-   790 000011F0 4801DF                      add rdi, rbx                                    ; 计算上边界的物理地址
-   791 000011F3 4883C324                    add rbx, 36                                     ; XSDT 尾部数组的物理地址
-   792                                  .madt0:
-   793 000011F7 4C8B1B                      mov r11, [rbx]             
-   794 000011FA 41813B41504943              cmp dword [r11], "APIC"                         ; MADT 表的标记
-   795 00001201 7436                        je .findm                       
-   796 00001203 4883C308                    add rbx, 8                                      ; 下一个元素
-   797 00001207 4839FB                      cmp rbx, rdi  
-   798 0000120A 7CEB                        jl .madt0
-   799 0000120C E968FFFFFF                  jmp .acpi_err
-   800                                  
-   801                                      ; 一些处理 VCPI 1.0, 在 RSDT 中遍历搜索 MADT
-   802                                  .acpi_1:
-   803 00001211 8B5B10                      mov ebx, [rbx + 16]                             ; 得到根系统描述符表 RSDT 的物理地址
-   804 00001214 678B7B04                    mov edi, [ebx + 4]                              ; 得到 RSDT 的长度, 以字节计
-   805 00001218 01DF                        add edi, ebx                                    ; 上边界物理地址
-   806 0000121A 83C324                      add ebx, 36                                     ; 尾部数组的物理地址
-   807 0000121D 4D31DB                      xor r11, r11 
-   808                                  .madt1:
-   809 00001220 67448B1B                    mov r11d, [ebx]
-   810 00001224 41813B41504943              cmp dword [r11], "APIC"                         ; MADT 表的标记
-   811 0000122B 740C                        je .findm
-   812 0000122D 83C304                      add ebx, 4
-   813 00001230 39FB                        cmp ebx, edi 
-   814 00001232 7CEC                        jl .madt1
-   815 00001234 E940FFFFFF                  jmp .acpi_err
-   816                                  
-   817                                  .findm:
-   818                                      ; 此时, r11 是 MADT 的物理地址
-   819 00001239 418B5324                    mov edx, [r11 + 36]                             ; 预置的 Local APIC 物理地址
-   820 0000123D 891D(28010000)              mov [rel lapic_addr], ebx
-   821                                  
-   822                                      ; 以下开始遍历系统中的逻辑处理器的 LAPIC ID 和 I/O APIC
-   823 00001243 4C8B3D(08000000)            mov r15, [rel position]
-   824 0000124A 4D8DBF[28000000]            lea r15, [r15 + cpu_list]
-   825                                  
-   826 00001251 4831FF                      xor rdi, rdi 
-   827 00001254 418B7B04                    mov edi, [r11 + 4]                              ; MADT 的长度
-   828 00001258 4C01DF                      add rdi, r11                                    ; 上边界物理地址
-   829 0000125B 4983C32C                    add r11, 44                                     ; 指向 MADT 尾部中断控制器结构列表
-   830                                  .enumd:
-   831 0000125F 41803B00                    cmp byte [r11], 0                               ; 0 代表 Local APIC
-   832 00001263 7408                        je .l_apic
-   833 00001265 41803B01                    cmp byte [r11], 1                               ; 1 代表 I/O APIC
-   834 00001269 741B                        je .ioapic
-   835 0000126B EB2D                        jmp .m_end 
-   836                                  .l_apic:
-   837 0000126D 41837B0400                  cmp dword [r11 + 4], 0                          ; Local APIC flag
-   838 00001272 7426                        jz .m_end
-   839 00001274 418A4303                    mov al, [r11 + 3]                                ; 获取 Local APIC ID
-   840 00001278 418807                      mov [r15], al                                   ; 保存 Local APIC ID 到 cpu_list
-   841 0000127B 49FFC7                      inc r15
-   842 0000127E FE05(27000000)              inc byte [rel num_cpus]                         ; 原来 cpu 数量是这么统计出来的
-   843 00001284 EB14                        jmp .m_end
-   844                                  .ioapic:
-   845 00001286 418A4302                    mov al, [r11 + 2]                               ; 取出 I/O APIC ID
-   846 0000128A 8805(30010000)              mov [rel ioapic_id], al                         ; 保存 I/O APIC ID
-   847 00001290 418B4304                    mov eax, [r11 + 4]                              ; 取出 I/O APIC 物理地址
-   848 00001294 8905(2C010000)              mov [rel ioapic_addr], eax                      ; 保存 I/O APIC ID 物理地址
-   849                                  .m_end:
-   850 0000129A 4831C0                      xor rax, rax 
-   851 0000129D 418A4301                    mov al, [r11 + 1]
-   852 000012A1 4901C3                      add r11, rax                                    ; 计算出下一个中断控制结构列表的物理地址
-   853 000012A4 4939FB                      cmp r11, rdi 
-   854 000012A7 7CB6                        jl .enumd
-   855                                  
-   856                                      ; 遍历完成, 映射物理地址到内核指定区域
-   857                                  
-   858                                      ; Local APIC -> LAPIC_START_ADDR
-   859 000012A9 49BD00E0FFFF7FFFFF-         mov r13, LAPIC_START_ADDR
-   859 000012B2 FF                 
-   860 000012B3 4831C0                      xor rax, rax 
-   861 000012B6 8B05(28010000)              mov eax, [rel lapic_addr]                       ; 取出 LAPIC 的物理地址
-   862 000012BC 83C81F                      or eax, 0x1f                                    ; 设置属性, PCD=PWT=U/S=R/W=P=1, 强不可缓存
-   863 000012BF E8B4F4FFFF                  call mapping_laddr_to_page
-   864                                      ; I/O APIC -> IOAPIC_START_ADDR
-   865 000012C4 49BD00D0FFFF7FFFFF-         mov r13, IOAPIC_START_ADDR
-   865 000012CD FF                 
-   866 000012CE 4831C0                      xor rax, rax 
-   867 000012D1 8B05(2C010000)              mov eax, [rel ioapic_addr]
-   868 000012D7 83C81F                      or eax, 0x1f  
-   869 000012DA E899F4FFFF                  call mapping_laddr_to_page
-   870                                  
-   871                                      ; 以下测量当前处理器 1ms 内经历了多少时钟周期, 作为后续的定时基准, 详情见书中284 页
-   872 000012DF 48BE00E0FFFF7FFFFF-         mov rsi, LAPIC_START_ADDR
-   872 000012E8 FF                 
+   787                                      ; 以下处理 VCPI 1.0, 在 RSDT 中遍历搜索 MADT
+   788                                  .vcpi_1:
+   789 0000120B 8B5B10                      mov ebx, [rbx + 16]                             ; 得到根系统描述符表 RSDT 的物理地址
+   790 0000120E 678B7B04                    mov edi, [ebx + 4]                              ; 得到 RSDT 的长度, 以字节计
+   791 00001212 01DF                        add edi, ebx                                    ; 上边界物理地址
+   792 00001214 83C324                      add ebx, 36                                     ; 尾部数组的物理地址
+   793 00001217 4D31DB                      xor r11, r11 
+   794                                  .madt1:
+   795 0000121A 67448B1B                    mov r11d, [ebx]
+   796 0000121E 41813B41504943              cmp dword [r11], "APIC"                         ; MADT 表的标记
+   797 00001225 740C                        je .findm
+   798 00001227 83C304                      add ebx, 4
+   799 0000122A 39FB                        cmp ebx, edi 
+   800 0000122C 7CEC                        jl .madt1
+   801 0000122E E940FFFFFF                  jmp .acpi_err
+   802                                  
+   803                                  .findm:
+   804                                      ; 此时, r11 是 MADT 的物理地址
+   805 00001233 418B5324                    mov edx, [r11 + 36]                             ; 预置的 Local APIC 物理地址
+   806 00001237 8915(28010000)              mov [rel lapic_addr], edx
+   807                                  
+   808                                      ; 以下开始遍历系统中的逻辑处理器的 LAPIC ID 和 I/O APIC
+   809 0000123D 4C8B3D(08000000)            mov r15, [rel position]
+   810 00001244 4D8DBF[28000000]            lea r15, [r15 + cpu_list]
+   811                                  
+   812 0000124B 4831FF                      xor rdi, rdi 
+   813 0000124E 418B7B04                    mov edi, [r11 + 4]                              ; MADT 的长度
+   814 00001252 4C01DF                      add rdi, r11                                    ; 上边界物理地址
+   815 00001255 4983C32C                    add r11, 44                                     ; 指向 MADT 尾部中断控制器结构列表
+   816                                  .enumd:
+   817 00001259 41803B00                    cmp byte [r11], 0                               ; 0 代表 Local APIC
+   818 0000125D 7408                        je .l_apic
+   819 0000125F 41803B01                    cmp byte [r11], 1                               ; 1 代表 I/O APIC
+   820 00001263 741B                        je .ioapic
+   821 00001265 EB2D                        jmp .m_end 
+   822                                  .l_apic:
+   823 00001267 41837B0400                  cmp dword [r11 + 4], 0                          ; Local APIC flag
+   824 0000126C 7426                        jz .m_end
+   825 0000126E 418A4303                    mov al, [r11 + 3]                                ; 获取 Local APIC ID
+   826 00001272 418807                      mov [r15], al                                   ; 保存 Local APIC ID 到 cpu_list
+   827 00001275 49FFC7                      inc r15
+   828 00001278 FE05(27000000)              inc byte [rel num_cpus]                         ; 原来 cpu 数量是这么统计出来的
+   829 0000127E EB14                        jmp .m_end
+   830                                  .ioapic:
+   831 00001280 418A4302                    mov al, [r11 + 2]                               ; 取出 I/O APIC ID
+   832 00001284 8805(30010000)              mov [rel ioapic_id], al                         ; 保存 I/O APIC ID
+   833 0000128A 418B4304                    mov eax, [r11 + 4]                              ; 取出 I/O APIC 物理地址
+   834 0000128E 8905(2C010000)              mov [rel ioapic_addr], eax                      ; 保存 I/O APIC ID 物理地址
+   835                                  .m_end:
+   836 00001294 4831C0                      xor rax, rax 
+   837 00001297 418A4301                    mov al, [r11 + 1]
+   838 0000129B 4901C3                      add r11, rax                                    ; 计算出下一个中断控制结构列表的物理地址
+   839 0000129E 4939FB                      cmp r11, rdi 
+   840 000012A1 7CB6                        jl .enumd
+   841                                  
+   842                                      ; 遍历完成, 映射物理地址到内核指定区域
+   843                                  
+   844                                      ; Local APIC -> LAPIC_START_ADDR
+   845 000012A3 49BD00E0FFFF7FFFFF-         mov r13, LAPIC_START_ADDR
+   845 000012AC FF                 
+   846 000012AD 4831C0                      xor rax, rax 
+   847 000012B0 8B05(28010000)              mov eax, [rel lapic_addr]                       ; 取出 LAPIC 的物理地址
+   848 000012B6 83C81F                      or eax, 0x1f                                    ; 设置属性, PCD=PWT=U/S=R/W=P=1, 强不可缓存
+   849 000012B9 E8BAF4FFFF                  call mapping_laddr_to_page
+   850                                      ; I/O APIC -> IOAPIC_START_ADDR
+   851 000012BE 49BD00D0FFFF7FFFFF-         mov r13, IOAPIC_START_ADDR
+   851 000012C7 FF                 
+   852 000012C8 4831C0                      xor rax, rax 
+   853 000012CB 8B05(2C010000)              mov eax, [rel ioapic_addr]
+   854 000012D1 83C81F                      or eax, 0x1f  
+   855 000012D4 E89FF4FFFF                  call mapping_laddr_to_page
+   856                                  
+   857                                      ; 以下测量当前处理器 1ms 内经历了多少时钟周期, 作为后续的定时基准, 详情见书中284 页
+   858 000012D9 48BE00E0FFFF7FFFFF-         mov rsi, LAPIC_START_ADDR
+   858 000012E2 FF                 
+   859                                  
+   860 000012E3 C78620030000000001-         mov dword [rsi + 0x320], 0x10000                ; 定时器的本地向量表入口寄存器, 单次击发模式
+   860 000012EC 00                 
+   861 000012ED C786E00300000B0000-         mov dword [rsi + 0x3e0], 0x0b                   ; 定时器的分频配置寄存器: 1 分频
+   861 000012F6 00                 
+   862                                  
+   863 000012F7 B00B                        mov al, 0x0b                                    ; RTC 寄存器 B                                     
+   864 000012F9 0C80                        or al, 0x80                                     ; 阻断 NMI
+   865 000012FB E670                        out 0x70, al            
+   866 000012FD B052                        mov al, 0x52                                    ; 设置寄存器 B, 开发周期性中断, 开放更新结束后中断, BCD 码, 24 小时制
+   867 000012FF E671                        out 0x71, al 
+   868                                  
+   869 00001301 B08A                        mov al, 0x8a                                    ; CMOS 寄存器 A
+   870 00001303 E670                        out 0x70, al 
+   871 00001305 B02D                        mov al, 0x2d                                    ; 32 kHz, 125 ms 的周期性中断
+   872 00001307 E671                        out 0x71, al                                    ; 写回 CMOS 寄存器 A
    873                                  
-   874 000012E9 C78620030000000001-         mov dword [rsi + 0x320], 0x10000                ; 定时器的本地向量表入口寄存器, 单次击发模式
-   874 000012F2 00                 
-   875 000012F3 C786E00300000B0000-         mov dword [rsi + 0x3e0], 0x0b                   ; 定时器的分频配置寄存器: 1 分频
-   875 000012FC 00                 
-   876                                  
-   877 000012FD B00B                        mov al, 0x0b                                    ; RTC 寄存器 B                                     
-   878 000012FF 0C80                        or al, 0x80                                     ; 阻断 NMI
-   879 00001301 E670                        out 0x70, al            
-   880 00001303 B052                        mov al, 0x52                                    ; 设置寄存器 B, 开发周期性中断, 开放更新结束后中断, BCD 码, 24 小时制
-   881 00001305 E671                        out 0x71, al 
-   882                                  
-   883 00001307 B08A                        mov al, 0x8a                                    ; CMOS 寄存器 A
-   884 00001309 E670                        out 0x70, al 
-   885 0000130B B02D                        mov al, 0x2d                                    ; 32 kHz, 125 ms 的周期性中断
-   886 0000130D E671                        out 0x71, al                                    ; 写回 CMOS 寄存器 A
+   874 00001309 B08C                        mov al, 0x8c
+   875 0000130B E670                        out 0x70, al 
+   876 0000130D E471                        in al, 0x71                                     ; 读寄存器 C
+   877                                  .w0:
+   878 0000130F E471                        in al, 0x71 
+   879 00001311 480FBAE006                  bt rax, 6                                       ; 更新周期结束中断已发生
+   880 00001316 73F7                        jnc .w0 
+   881 00001318 C78680030000FFFFFF-         mov dword [rsi + 0x380], 0xffff_ffff            ; 定时器初始计数寄存器: 置初始值并开始计数
+   881 00001321 FF                 
+   882                                  .w1:
+   883 00001322 E471                        in al, 0x71     
+   884 00001324 480FBAE006                  bt rax, 6   
+   885 00001329 73F7                        jnc .w1 
+   886 0000132B 8B9690030000                mov edx, [rsi + 0x390],                         ; 定时器初始计数寄存器: 读当前计数值
    887                                  
-   888 0000130F B08C                        mov al, 0x8c
-   889 00001311 E670                        out 0x70, al 
-   890 00001313 E471                        in al, 0x71                                     ; 读寄存器 C
-   891                                  .w0:
-   892 00001315 E471                        in al, 0x71 
-   893 00001317 480FBAE006                  bt rax, 6                                       ; 更新周期结束中断已发生
-   894 0000131C 73F7                        jnc .w0 
-   895 0000131E C78680030000FFFFFF-         mov dword [rsi + 0x380], 0xffff_ffff            ; 定时器初始计数寄存器: 置初始值并开始计数
-   895 00001327 FF                 
-   896                                  .w1:
-   897 00001328 E471                        in al, 0x71     
-   898 0000132A 480FBAE006                  bt rax, 6   
-   899 0000132F 73F7                        jnc .w1 
-   900 00001331 8B9690030000                mov edx, [rsi + 0x390],                         ; 定时器初始计数寄存器: 读当前计数值
+   888 00001331 B8FFFFFFFF                  mov eax, 0xffff_ffff
+   889 00001336 29D0                        sub eax, edx 
+   890 00001338 31D2                        xor edx, edx 
+   891 0000133A BB7D000000                  mov ebx, 125                                    ; 125ms
+   892 0000133F F7F3                        div ebx                                         ; 结果存在 eax 中, 即当前处理器在 1ms 内的时钟数
+   893                                  
+   894 00001341 8905(32010000)              mov [rel clocks_1ms], eax                       ; 记录
+   895                                  
+   896 00001347 B00B                        mov al, 0x0b                                    ; RTC 寄存器 B
+   897 00001349 0C80                        or al, 0x80                                     ; 阻断 NMI
+   898 0000134B E670                        out 0x70, al 
+   899 0000134D B012                        mov al, 0x12                                    ; 设置寄存器 B, 只允许更新周期结束中断
+   900 0000134F E671                        out 0x71, al 
    901                                  
-   902 00001337 B8FFFFFFFF                  mov eax, 0xffff_ffff
-   903 0000133C 29D0                        sub eax, edx 
-   904 0000133E 31D2                        xor edx, edx 
-   905 00001340 BB7D000000                  mov ebx, 125                                    ; 125ms
-   906 00001345 F7F3                        div ebx                                         ; 结果存在 eax 中, 即当前处理器在 1ms 内的时钟数
-   907                                  
-   908 00001347 8905(32010000)              mov [rel clocks_1ms], eax                       ; 记录
-   909                                  
-   910 0000134D B00B                        mov al, 0x0b                                    ; RTC 寄存器 B
-   911 0000134F 0C80                        or al, 0x80                                     ; 阻断 NMI
-   912 00001351 E670                        out 0x70, al 
-   913 00001353 B012                        mov al, 0x12                                    ; 设置寄存器 B, 只允许更新周期结束中断
-   914 00001355 E671                        out 0x71, al 
-   915                                  
-   916                                      ; 安装用于任务切换的中断处理过程
-   917 00001357 4C8B0D(08000000)            mov r9, [rel position]
-   918 0000135E 498D81[EC0C0000]            lea rax, [r9 + new_task_notify_handler]         ; 得到中断处理过程的线性地址
-   919 00001365 E8BFEDFFFF                  call make_interrupt_gate                        
-   920                                  
-   921 0000136A FA                          cli 
-   922 0000136B 41B8FE000000                mov r8, 0xfe                                    ; 任务切换使用的中断向量, 数越大, 优先级越高
-   923 00001371 E8F8EDFFFF                  call mount_idt_entry
-   924 00001376 FB                          sti 
-   925                                  
-   926                                      ; 以下安装时间片到期中断处理过程
-   927 00001377 4C8B0D(08000000)            mov r9, [rel position]
-   928 0000137E 498D81[2B0C0000]            lea rax, [r9 + time_slice_out_handler]          ; 得到中断处理过程的线性地址
-   929 00001385 E89FEDFFFF                  call make_interrupt_gate            
-   930                                  
-   931 0000138A FA                          cli 
-   932 0000138B 41B8FD000000                mov r8, 0xfd 
-   933 00001391 E8D8EDFFFF                  call mount_idt_entry
-   934 00001396 FB                          sti
-   935                                  
-   936                                      ; 以下初始化应用处理器 AP, 先将初始化代码复制到物理内存的选定位置
-   937 00001397 488B35(08000000)            mov rsi, [rel position]
-   938 0000139E 488DB6[00000000]            lea rsi, [rsi + section.ap_init_block.start]    ; 源
-   939 000013A5 BF00F00000                  mov rdi, AP_START_UP_ADDR                       ; 目的地
-   940 000013AA B983000000                  mov rcx, ap_init_tail - ap_init                 ; 次数
-   941 000013AF FC                          cld 
-   942 000013B0 F3A4                        repe movsb 
-   943                                  
-   944                                      ; 所有处理器都应该在初始化期间递增应答计数值
-   945 000013B2 FE05(31010000)              inc byte [rel ack_cpus]                         ; BSP 自己的应答计数值
-   946                                  
-   947                                      ; 给其它处理器发送 INIT IPI 和 SIPI, 命令他们初始化自己
-   948 000013B8 48BE00E0FFFF7FFFFF-         mov rsi, LAPIC_START_ADDR
-   948 000013C1 FF                 
-   949 000013C2 C78610030000000000-         mov dword [rsi + 0x310], 0
-   949 000013CB 00                 
-   950 000013CC C7860003000000450C-         mov dword [rsi + 0x300], 0x000c4500             ; 先发送 INIT IPI
-   950 000013D5 00                 
-   951 000013D6 C786000300000F460C-         mov dword [rsi + 0x300], (AP_START_UP_ADDR >> 12) | 0x000c4600      ; start up IPI
-   951 000013DF 00                 
-   952 000013E0 C786000300000F460C-         mov dword [rsi + 0x300], (AP_START_UP_ADDR >> 12) | 0x000c4600      ; 保险起见发两次
-   952 000013E9 00                 
-   953                                  
-   954 000013EA 8A05(27000000)              mov al, [rel num_cpus]
-   955                                  
-   956                                  .wcpus:
-   957 000013F0 3A05(31010000)              cmp al, [rel ack_cpus]
-   958 000013F6 75F8                        jne .wcpus                                      ; 等待所有应用处理器的应答
-   959                                  
-   960                                      ; 显示已应答的处理器数量
-   961 000013F8 4C8B3D(08000000)            mov r15, [rel position]
-   962                                  
-   963 000013FF 4D31C0                      xor r8, r8 
-   964 00001402 448A05(31010000)            mov r8b, [rel ack_cpus]
-   965 00001409 498D9F[69010000]            lea rbx, [r15 + buffer]
-   966 00001410 E834F5FFFF                  call bin64_to_dec
-   967 00001415 E8E6EBFFFF                  call put_string64
-   968                                  
-   969 0000141A 498D9F[58010000]            lea rbx, [r15 + cpu_init_ok]
-   970 00001421 E8DAEBFFFF                  call put_string64
+   902                                      ; 安装用于任务切换的中断处理过程
+   903 00001351 4C8B0D(08000000)            mov r9, [rel position]
+   904 00001358 498D81[ED0C0000]            lea rax, [r9 + new_task_notify_handler]         ; 得到中断处理过程的线性地址
+   905 0000135F E8C5EDFFFF                  call make_interrupt_gate                        
+   906                                  
+   907 00001364 FA                          cli 
+   908 00001365 41B8FE000000                mov r8, 0xfe                                    ; 任务切换使用的中断向量, 数越大, 优先级越高
+   909 0000136B E8FEEDFFFF                  call mount_idt_entry
+   910 00001370 FB                          sti 
+   911                                  
+   912                                      ; 以下安装时间片到期中断处理过程
+   913 00001371 4C8B0D(08000000)            mov r9, [rel position]
+   914 00001378 498D81[2C0C0000]            lea rax, [r9 + time_slice_out_handler]          ; 得到中断处理过程的线性地址
+   915 0000137F E8A5EDFFFF                  call make_interrupt_gate            
+   916                                  
+   917 00001384 FA                          cli 
+   918 00001385 41B8FD000000                mov r8, 0xfd 
+   919 0000138B E8DEEDFFFF                  call mount_idt_entry
+   920 00001390 FB                          sti
+   921                                  
+   922                                      ; 以下初始化应用处理器 AP, 先将初始化代码复制到物理内存的选定位置
+   923 00001391 488B35(08000000)            mov rsi, [rel position]
+   924 00001398 488DB6[00000000]            lea rsi, [rsi + section.ap_init_block.start]    ; 源
+   925 0000139F BF00F00000                  mov rdi, AP_START_UP_ADDR                       ; 目的地
+   926 000013A4 B983000000                  mov rcx, ap_init_tail - ap_init                 ; 次数
+   927 000013A9 FC                          cld 
+   928 000013AA F3A4                        repe movsb 
+   929                                  
+   930                                      ; 所有处理器都应该在初始化期间递增应答计数值
+   931 000013AC FE05(31010000)              inc byte [rel ack_cpus]                         ; BSP 自己的应答计数值
+   932                                  
+   933                                      ; 给其它处理器发送 INIT IPI 和 SIPI, 命令他们初始化自己
+   934 000013B2 48BE00E0FFFF7FFFFF-         mov rsi, LAPIC_START_ADDR
+   934 000013BB FF                 
+   935 000013BC C78610030000000000-         mov dword [rsi + 0x310], 0
+   935 000013C5 00                 
+   936 000013C6 C7860003000000450C-         mov dword [rsi + 0x300], 0x000c4500             ; 先发送 INIT IPI
+   936 000013CF 00                 
+   937 000013D0 C786000300000F460C-         mov dword [rsi + 0x300], (AP_START_UP_ADDR >> 12) | 0x000c4600      ; start up IPI
+   937 000013D9 00                 
+   938 000013DA C786000300000F460C-         mov dword [rsi + 0x300], (AP_START_UP_ADDR >> 12) | 0x000c4600      ; 保险起见发两次
+   938 000013E3 00                 
+   939                                  
+   940 000013E4 8A05(27000000)              mov al, [rel num_cpus]
+   941                                  
+   942                                  .wcpus:
+   943 000013EA 3A05(31010000)              cmp al, [rel ack_cpus]
+   944 000013F0 75F8                        jne .wcpus                                      ; 等待所有应用处理器的应答
+   945                                  
+   946                                      ; 显示已应答的处理器数量
+   947 000013F2 4C8B3D(08000000)            mov r15, [rel position]
+   948                                  
+   949 000013F9 4D31C0                      xor r8, r8 
+   950 000013FC 448A05(31010000)            mov r8b, [rel ack_cpus]
+   951 00001403 498D9F[69010000]            lea rbx, [r15 + buffer]
+   952 0000140A E83AF5FFFF                  call bin64_to_dec
+   953 0000140F E8ECEBFFFF                  call put_string64
+   954                                  
+   955 00001414 498D9F[58010000]            lea rbx, [r15 + cpu_init_ok]
+   956 0000141B E8E0EBFFFF                  call put_string64
+   957                                  
+   958                                      ; 以下创建进程
+   959 00001420 41B832000000                mov r8, 50
+   960 00001426 E8EDF9FFFF                  call create_process
+   961                                  
+   962 0000142B E9A7F6FFFF                  jmp ap_to_core_entry.do_idle                    ; 去处理器集结休息区
+   963                                  
+   964                                  section ap_init_block vstart=0                      ; vstart 改变段内汇编地址, 让其都相对于段起始, 即这段代码是浮动的
+   965                                  
+   966                                      bits 16                                         ; 应用处理器 AP 从实模式开始
+   967                                  
+   968                                  ap_init:
+   969 00000000 B8000F                      mov ax, AP_START_UP_ADDR >> 4
+   970 00000003 8ED8                        mov ds, ax 
    971                                  
-   972                                      ; 以下创建进程
-   973 00001426 41B832000000                mov r8, 50
-   974 0000142C E8EDF9FFFF                  call create_process
-   975                                  
-   976 00001431 E99EF6FFFF                  jmp ap_to_core_entry.do_idle                    ; 去处理器集结休息区
-   977                                  
-   978                                  section ap_init_block vstart=0                      ; vstart 改变段内汇编地址, 让其都相对于段起始, 即这段代码是浮动的
-   979                                  
-   980                                      bits 16                                         ; 应用处理器 AP 从实模式开始
-   981                                  
-   982                                  ap_init:
-   983 00000000 B8000F                      mov ax, AP_START_UP_ADDR >> 4
-   984 00000003 8ED8                        mov ds, ax 
-   985                                  
-   986                                      SET_SPIN_LOCK al, byte [lock_var]               ; 自旋知道获得锁
+   972                                      SET_SPIN_LOCK al, byte [lock_var]               ; 自旋知道获得锁
     49                              <1>  %%spin_lock:
     50 00000005 803E[8200]00        <1>  cmp %2, 0
     51 0000000A 7404                <1>  je %%get_lock
@@ -2200,64 +2186,64 @@
     56 00000012 8606[8200]          <1>  xchg %1, %2
     57 00000016 3C00                <1>  cmp %1, 0
     58 00000018 75EB                <1>  jne %%spin_lock
-   987                                  
-   988 0000001A B8E007                      mov ax, SDA_PHY_ADDR >> 4                       ; 切换到系统数据区
-   989 0000001D 8ED8                        mov ds, ax 
-   990                                  
-   991 0000001F 0F01160200                  lgdt [2]                                        ; 加载描述符寄存器 GDTR, 实模式下只加载 6 字节的内容, 界限值 2 字节, 基地址 4 字节, 描述符已经填好
-   992                                  
-   993 00000024 E492                        in al, 0x92                                     ; 南桥芯片内端口
-   994 00000026 0C02                        or al, 0000_0010B
-   995 00000028 E692                        out 0x92, al                                    ; 打开 A20
-   996                                  
-   997 0000002A FA                          cli                                             ; 中断机制尚未工作
-   998                                  
-   999 0000002B 0F20C0                      mov eax, cr0
-  1000 0000002E 6683C801                    or eax, 1
-  1001 00000032 0F22C0                      mov cr0, eax                                    ; 设置 PE 位
-  1002                                  
-  1003                                      ; 进入保护模式...
-  1004 00000035 EA[3AF0]0800                jmp 0x0008: AP_START_UP_ADDR + .flush           ; 0x0008 是保护模式下的代码段描述符的选择子, 清流水线并串行化处理器
-  1005                                  
-  1006                                      [bits 32]
-  1007                                  .flush:
-  1008 0000003A B810000000                  mov eax, 0x0010                                 ; 加载数据段(4gb)选择子
-  1009 0000003F 8ED0                        mov ss, eax                                     ; 加载堆栈段(4gb)选择子
-  1010 00000041 BC007E0000                  mov esp, 0x7e00                                 ; 堆栈指针
-  1011                                  
-  1012                                      ; 令 CR3 寄存器指向 4 级表头(保护模式下的 32 位 CR3)
-  1013 00000046 B800A00000                  mov eax, PML4_PHY_ADDR                          ; PCD = PWT = 0
-  1014 0000004B 0F22D8                      mov cr3, eax 
-  1015                                  
-  1016                                      ; 开启物理地址扩展 PAE
-  1017 0000004E 0F20E0                      mov eax, cr4 
-  1018 00000051 0FBAE805                    bts eax, 5
-  1019 00000055 0F22E0                      mov cr4, eax 
-  1020                                  
-  1021                                      ; 设置型号专属寄存器 IA32_EFER.LME，允许 IA_32e 模式
-  1022 00000058 B9800000C0                  mov ecx, 0x0c0000080                            ; 指定型号专属寄存器 IA32_EFER
-  1023 0000005D 0F32                        rdmsr 
-  1024 0000005F 0FBAE808                    bts eax, 8                                      ; 设置 LME 位
-  1025 00000063 0F30                        wrmsr
+   973                                  
+   974 0000001A B8E007                      mov ax, SDA_PHY_ADDR >> 4                       ; 切换到系统数据区
+   975 0000001D 8ED8                        mov ds, ax 
+   976                                  
+   977 0000001F 0F01160200                  lgdt [2]                                        ; 加载描述符寄存器 GDTR, 实模式下只加载 6 字节的内容, 界限值 2 字节, 基地址 4 字节, 描述符已经填好
+   978                                  
+   979 00000024 E492                        in al, 0x92                                     ; 南桥芯片内端口
+   980 00000026 0C02                        or al, 0000_0010B
+   981 00000028 E692                        out 0x92, al                                    ; 打开 A20
+   982                                  
+   983 0000002A FA                          cli                                             ; 中断机制尚未工作
+   984                                  
+   985 0000002B 0F20C0                      mov eax, cr0
+   986 0000002E 6683C801                    or eax, 1
+   987 00000032 0F22C0                      mov cr0, eax                                    ; 设置 PE 位
+   988                                  
+   989                                      ; 进入保护模式...
+   990 00000035 EA[3AF0]0800                jmp 0x0008: AP_START_UP_ADDR + .flush           ; 0x0008 是保护模式下的代码段描述符的选择子, 清流水线并串行化处理器
+   991                                  
+   992                                      [bits 32]
+   993                                  .flush:
+   994 0000003A B810000000                  mov eax, 0x0010                                 ; 加载数据段(4gb)选择子
+   995 0000003F 8ED0                        mov ss, eax                                     ; 加载堆栈段(4gb)选择子
+   996 00000041 BC007E0000                  mov esp, 0x7e00                                 ; 堆栈指针
+   997                                  
+   998                                      ; 令 CR3 寄存器指向 4 级表头(保护模式下的 32 位 CR3)
+   999 00000046 B800A00000                  mov eax, PML4_PHY_ADDR                          ; PCD = PWT = 0
+  1000 0000004B 0F22D8                      mov cr3, eax 
+  1001                                  
+  1002                                      ; 开启物理地址扩展 PAE
+  1003 0000004E 0F20E0                      mov eax, cr4 
+  1004 00000051 0FBAE805                    bts eax, 5
+  1005 00000055 0F22E0                      mov cr4, eax 
+  1006                                  
+  1007                                      ; 设置型号专属寄存器 IA32_EFER.LME，允许 IA_32e 模式
+  1008 00000058 B9800000C0                  mov ecx, 0x0c0000080                            ; 指定型号专属寄存器 IA32_EFER
+  1009 0000005D 0F32                        rdmsr 
+  1010 0000005F 0FBAE808                    bts eax, 8                                      ; 设置 LME 位
+  1011 00000063 0F30                        wrmsr
+  1012                                  
+  1013                                      ; 开启分页功能
+  1014 00000065 0F20C0                      mov eax, cr0 
+  1015 00000068 0FBAE81F                    bts eax, 31                                     ; 置位 CR0.PG
+  1016 0000006C 0F22C0                      mov cr0, eax 
+  1017                                  
+  1018                                      ; 进入 64 位模式
+  1019 0000006F EA[76F00000]1800            jmp CORE_CODE64_SEL:AP_START_UP_ADDR + .to64
+  1020                                  .to64:
+  1021                                      bits 64
+  1022                                  
+  1023                                      ; 转入内核中继续初始化, 使用高端线性地址
+  1024 00000076 48BB-                       mov rbx, UPPER_CORE_LINEAR + ap_to_core_entry
+  1024 00000078 [B40902000080FFFF] 
+  1025 00000080 FFE3                        jmp rbx 
   1026                                  
-  1027                                      ; 开启分页功能
-  1028 00000065 0F20C0                      mov eax, cr0 
-  1029 00000068 0FBAE81F                    bts eax, 31                                     ; 置位 CR0.PG
-  1030 0000006C 0F22C0                      mov cr0, eax 
-  1031                                  
-  1032                                      ; 进入 64 位模式
-  1033 0000006F EA[76F00000]1800            jmp CORE_CODE64_SEL:AP_START_UP_ADDR + .to64
-  1034                                  .to64:
-  1035                                      bits 64
-  1036                                  
-  1037                                      ; 转入内核中继续初始化, 使用高端线性地址
-  1038 00000076 48BB-                       mov rbx, UPPER_CORE_LINEAR + ap_to_core_entry
-  1038 00000078 [B40902000080FFFF] 
-  1039 00000080 FFE3                        jmp rbx 
-  1040                                  
-  1041 00000082 00                      lock_var db 0
-  1042                                  
-  1043                                  ap_init_tail:
-  1044                                  
-  1045                                  section core_tail
-  1046                                  core_end:
+  1027 00000082 00                      lock_var db 0
+  1028                                  
+  1029                                  ap_init_tail:
+  1030                                  
+  1031                                  section core_tail
+  1032                                  core_end:

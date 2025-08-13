@@ -149,7 +149,7 @@ put_char:
 ; 输入: rbx=字符串首地址, dh=行, dl=列, r9b=颜色属性
 ; ------------------------------------------------------------
 %ifdef __MP__ 
-_prnxy_locker dp 0
+_prnxy_locker dq 0
 %endif 
 
 put_cstringxy64:

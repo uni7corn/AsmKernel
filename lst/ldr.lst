@@ -216,269 +216,269 @@
    125 0000025F 66B920000000                mov ecx, 32                             ; 地址描述结构的长度
    126 00000265 66BA50414D53                mov edx, "PAMS"
    127 0000026B CD15                        int 0x15
-   128 0000026D 01CF                        add di, cx                              ; 写入 rs:di 中, 增加 di 偏移
-   129 0000026F 26FF061600                  inc word [es:0x16]
-   130 00000274 6609DB                      or ebx, ebx                             ; 若 ebx 为 0, 意味着是最后一个地址数据
-   131 00000277 75E0                        jnz .mlookup
+   128 0000026D 83C720                      add di, 32                              ; 写入 rs:di 中, 增加 di 偏移
+   129 00000270 26FF061600                  inc word [es:0x16]
+   130 00000275 6609DB                      or ebx, ebx                             ; 若 ebx 为 0, 意味着是最后一个地址数据
+   131 00000278 75DF                        jnz .mlookup
    132                                  
-   133 00000279 07                          pop es
+   133 0000027A 07                          pop es
    134                                  
    135                                      ; 获取存储处理器的物理/虚拟地址尺寸信息
-   136 0000027A 66B800000080                mov eax, 0x80000000                     
-   137 00000280 0FA2                        cpuid
-   138 00000282 663D08000080                cmp eax, 0x80000008
-   139 00000288 B82430                      mov ax, 0x3024                          ; 设置默认的处理器物理/逻辑地址位数 36(0x24) 和 48(0x30)
-   140 0000028B 7208                        jb .no_plsize
+   136 0000027B 66B800000080                mov eax, 0x80000000                     
+   137 00000281 0FA2                        cpuid
+   138 00000283 663D08000080                cmp eax, 0x80000008
+   139 00000289 B82430                      mov ax, 0x3024                          ; 设置默认的处理器物理/逻辑地址位数 36(0x24) 和 48(0x30)
+   140 0000028C 7208                        jb .no_plsize
    141                                  
-   142 0000028D 66B808000080                mov eax, 0x80000008                     ; 执行后, ax 中 0-7 位(al)是物理地址尺寸, 8-15 位(ah)是虚拟地址尺寸
-   143 00000293 0FA2                        cpuid
+   142 0000028E 66B808000080                mov eax, 0x80000008                     ; 执行后, ax 中 0-7 位(al)是物理地址尺寸, 8-15 位(ah)是虚拟地址尺寸
+   143 00000294 0FA2                        cpuid
    144                                  
    145                                  .no_plsize:
    146                                      ; 保存物理和虚拟地址尺寸到系统数据区
-   147 00000295 1E                          push ds 
-   148 00000296 BBE007                      mov bx, SDA_PHY_ADDR >> 4               ; 切换到系统数据区
-   149 00000299 8EDB                        mov ds, bx 
-   150 0000029B A30000                      mov word [0], ax                        ; 记录处理器的物理/虚拟地址尺寸
-   151 0000029E 1F                          pop ds 
+   147 00000296 1E                          push ds 
+   148 00000297 BBE007                      mov bx, SDA_PHY_ADDR >> 4               ; 切换到系统数据区
+   149 0000029A 8EDB                        mov ds, bx 
+   150 0000029C A30000                      mov word [0], ax                        ; 记录处理器的物理/虚拟地址尺寸
+   151 0000029F 1F                          pop ds 
    152                                  
    153                                      ; 准备显示存储器的物理地址尺寸信息
-   154 0000029F 50                          push ax                                 ; 备份 ax
+   154 000002A0 50                          push ax                                 ; 备份 ax
    155                                  
-   156 000002A0 25FF00                      and ax, 0x00ff                          ; 只要 al 中的物理地址
-   157 000002A3 BE0200                      mov si, 2
-   158 000002A6 B30A                        mov bl, 10
+   156 000002A1 25FF00                      and ax, 0x00ff                          ; 只要 al 中的物理地址
+   157 000002A4 BE0200                      mov si, 2
+   158 000002A7 B30A                        mov bl, 10
    159                                  
    160                                  .re_div0:
-   161 000002A8 F6F3                        div bl                                  ; 16 位除法, 商在 al 中, 余数在 ah 里
-   162 000002AA 80C430                      add ah, 0x30                            ; ASCII 码
-   163 000002AD 88A4[DE00]                  mov [paddr + si], ah                    ; 低位在高地址
-   164 000002B1 4E                          dec si 
-   165 000002B2 25FF00                      and ax, 0x00ff
-   166 000002B5 75F1                        jnz .re_div0
+   161 000002A9 F6F3                        div bl                                  ; 16 位除法, 商在 al 中, 余数在 ah 里
+   162 000002AB 80C430                      add ah, 0x30                            ; ASCII 码
+   163 000002AE 88A4[DE00]                  mov [paddr + si], ah                    ; 低位在高地址
+   164 000002B2 4E                          dec si 
+   165 000002B3 25FF00                      and ax, 0x00ff
+   166 000002B6 75F1                        jnz .re_div0
    167                                  
    168                                      ; 准备显示处理器的虚拟地址尺寸信息
-   169 000002B7 58                          pop ax 
+   169 000002B8 58                          pop ax 
    170                                  
-   171 000002B8 C1E808                      shr ax, 8                               ; 将虚拟地址移到 al 重复上边的逻辑
-   172 000002BB BE0200                      mov si, 2
-   173 000002BE B30A                        mov bl, 10
+   171 000002B9 C1E808                      shr ax, 8                               ; 将虚拟地址移到 al 重复上边的逻辑
+   172 000002BC BE0200                      mov si, 2
+   173 000002BF B30A                        mov bl, 10
    174                                  .re_div1:
-   175 000002C0 F6F3                        div bl 
-   176 000002C2 80C430                      add ah, 0x30 
-   177 000002C5 88A4[F600]                  mov [laddr + si], ah 
-   178 000002C9 4E                          dec si 
-   179 000002CA 25FF00                      and ax, 0x00ff
-   180 000002CD 75F1                        jnz .re_div1
+   175 000002C1 F6F3                        div bl 
+   176 000002C3 80C430                      add ah, 0x30 
+   177 000002C6 88A4[F600]                  mov [laddr + si], ah 
+   178 000002CA 4E                          dec si 
+   179 000002CB 25FF00                      and ax, 0x00ff
+   180 000002CE 75F1                        jnz .re_div1
    181                                  
    182                                      ; 显示处理器的物理/虚拟地址尺寸信息 
-   183 000002CF 6A07                        push 0x0007
-   184 000002D1 6A33                        push protect - cpu_addr
-   185 000002D3 68[C800]                    push cpu_addr
-   186 000002D6 E8A6FE                      call put_string_by_bios
+   183 000002D0 6A07                        push 0x0007
+   184 000002D2 6A33                        push protect - cpu_addr
+   185 000002D4 68[C800]                    push cpu_addr
+   186 000002D7 E8A5FE                      call put_string_by_bios
    187                                  
    188                                      ; 以下开始进入保护模式, 为 IA-32e 模式做必要的准备工作
-   189 000002D9 B80010                      mov ax, GDT_PHY_ADDR >> 4               ; 计算 GDT 所在的逻辑段地址
-   190 000002DC 8ED8                        mov ds, ax 
+   189 000002DA B80010                      mov ax, GDT_PHY_ADDR >> 4               ; 计算 GDT 所在的逻辑段地址
+   190 000002DD 8ED8                        mov ds, ax 
    191                                  
    192                                      ; 跳过 0# 号描述符的槽位, 处理器规定 0# 号描述符为空
    193                                      
    194                                      ; 创建 1# 描述符, 保护模式下的代码段描述符
-   195 000002DE 66C7060800FFFF0000          mov dword [0x08], 0x0000ffff            ; 基地址为0, 界限0xFFFFF, DPL=00, 4KB 粒度, 代码段描述符, 向上扩展
-   196 000002E7 66C7060C000098CF00          mov dword [0x0c], 0x00cf9800
+   195 000002DF 66C7060800FFFF0000          mov dword [0x08], 0x0000ffff            ; 基地址为0, 界限0xFFFFF, DPL=00, 4KB 粒度, 代码段描述符, 向上扩展
+   196 000002E8 66C7060C000098CF00          mov dword [0x0c], 0x00cf9800
    197                                      
    198                                      ; 创建 2# 描述符, 保护模式下的数据段和堆栈段描述符
-   199 000002F0 66C7061000FFFF0000          mov dword [0x10], 0x0000ffff            ; 基地址为0, 界限0xFFFFF, DPL=00, 4KB 粒度, 数据段描述符, 向上扩展
-   200 000002F9 66C70614000092CF00          mov dword [0x14], 0x00cf9200
+   199 000002F1 66C7061000FFFF0000          mov dword [0x10], 0x0000ffff            ; 基地址为0, 界限0xFFFFF, DPL=00, 4KB 粒度, 数据段描述符, 向上扩展
+   200 000002FA 66C70614000092CF00          mov dword [0x14], 0x00cf9200
    201                                  
    202                                      ; 创建 3# 描述符, 64 位模式下的代码段描述符。为进入 64 位提前作准备, 其 L 位是 1
-   203 00000302 66C7061800FFFF0000          mov dword [0x18], 0x0000ffff            ; 基地址为0, 界限0xFFFFF, DPL=00, 4KB 粒度, L=1, 代码段描述符, 向上扩展
-   204 0000030B 66C7061C000098AF00          mov dword [0x1c], 0x00af9800
+   203 00000303 66C7061800FFFF0000          mov dword [0x18], 0x0000ffff            ; 基地址为0, 界限0xFFFFF, DPL=00, 4KB 粒度, L=1, 代码段描述符, 向上扩展
+   204 0000030C 66C7061C000098AF00          mov dword [0x1c], 0x00af9800
    205                                  
    206                                      ; 记录 GDT 的基地址和界限值
-   207 00000314 B8E007                      mov ax, SDA_PHY_ADDR >> 4               ; 切换到系统数据区
-   208 00000317 8ED8                        mov ds, ax  
+   207 00000315 B8E007                      mov ax, SDA_PHY_ADDR >> 4               ; 切换到系统数据区
+   208 00000318 8ED8                        mov ds, ax  
    209                                  
-   210 00000319 C70602001F00                mov word[2], 0x1f                       ; 描述符表的界限
-   211 0000031F 66C706040000000100          mov dword[4], GDT_PHY_ADDR              ; GDT 的线性基地址
+   210 0000031A C70602001F00                mov word[2], 0x1f                       ; 描述符表的界限
+   211 00000320 66C706040000000100          mov dword[4], GDT_PHY_ADDR              ; GDT 的线性基地址
    212                                  
    213                                      ; 将 gdt 表的地址加载到 GDTR 寄存器
-   214 00000328 0F01160200                  lgdt [2]
+   214 00000329 0F01160200                  lgdt [2]
    215                                  
-   216 0000032D E492                        in al, 0x92                             ; 南桥芯片内的端口
-   217 0000032F 0C02                        or al, 0000_0010B
-   218 00000331 E692                        out 0x92, al                            ; 打开处理器的第 21 根地址线 A20
+   216 0000032E E492                        in al, 0x92                             ; 南桥芯片内的端口
+   217 00000330 0C02                        or al, 0000_0010B
+   218 00000332 E692                        out 0x92, al                            ; 打开处理器的第 21 根地址线 A20
    219                                  
-   220 00000333 FA                          cli                                     ; 关闭中断
+   220 00000334 FA                          cli                                     ; 关闭中断
    221                                  
-   222 00000334 0F20C0                      mov eax, cr0                            ; 设置控制寄存器 CR0 的 PE 位, 将处理器从实模式切换到保护模式。
-   223 00000337 6683C801                    or eax, 1
-   224 0000033B 0F22C0                      mov cr0, eax 
+   222 00000335 0F20C0                      mov eax, cr0                            ; 设置控制寄存器 CR0 的 PE 位, 将处理器从实模式切换到保护模式。
+   223 00000338 6683C801                    or eax, 1
+   224 0000033C 0F22C0                      mov cr0, eax 
    225                                  
    226                                      ; 以下进入保护模式
-   227 0000033E 66EA[46F30000]0800          jmp 0x0008: dword LDR_PHY_ADDR + flush  ; 0x0008 是 16 位描述符选择子, 从 GDT 中选择第二个描述符。jmp 后清流水线并串行化处理器, 跳转到 flush
+   227 0000033F 66EA[47F30000]0800          jmp 0x0008: dword LDR_PHY_ADDR + flush  ; 0x0008 是 16 位描述符选择子, 从 GDT 中选择第二个描述符。jmp 后清流水线并串行化处理器, 跳转到 flush
    228                                  
    229                                      [bits 32]
    230                                  flush:
-   231 00000346 B810000000                  mov eax, 0x0010                         ; 加载数据段(4GB)选择子
-   232 0000034B 8ED8                        mov ds, eax
-   233 0000034D 8EC0                        mov es, eax
-   234 0000034F 8EE0                        mov fs, eax
-   235 00000351 8EE8                        mov gs, eax
-   236 00000353 8ED0                        mov ss, eax  
-   237 00000355 BC007C0000                  mov esp, 0x7c00                         ; 堆栈指针
+   231 00000347 B810000000                  mov eax, 0x0010                         ; 加载数据段(4GB)选择子
+   232 0000034C 8ED8                        mov ds, eax
+   233 0000034E 8EC0                        mov es, eax
+   234 00000350 8EE0                        mov fs, eax
+   235 00000352 8EE8                        mov gs, eax
+   236 00000354 8ED0                        mov ss, eax  
+   237 00000356 BC007C0000                  mov esp, 0x7c00                         ; 堆栈指针
    238                                  
    239                                      ; 显示信息, 在保护模式下位进入 IA-32e 模式做准备
-   240 0000035A BB[FBF00000]                mov ebx, LDR_PHY_ADDR + protect
-   241 0000035F E863010000                  call put_string_flat32
+   240 0000035B BB[FBF00000]                mov ebx, LDR_PHY_ADDR + protect
+   241 00000360 E863010000                  call put_string_flat32
    242                                  
    243                                      ; 以下加载系统核心程序
-   244 00000364 BF00000200                  mov edi, CORE_PHY_ADDR
+   244 00000365 BF00000200                  mov edi, CORE_PHY_ADDR
    245                                  
-   246 00000369 B809000000                  mov eax, COR_START_SECTOR
-   247 0000036E 89FB                        mov ebx, edi                            ; 起始地址
-   248 00000370 E8FD010000                  call read_hard_disk_0                   ; 读取程序起始第一个扇区
+   246 0000036A B809000000                  mov eax, COR_START_SECTOR
+   247 0000036F 89FB                        mov ebx, edi                            ; 起始地址
+   248 00000371 E8FD010000                  call read_hard_disk_0                   ; 读取程序起始第一个扇区
    249                                  
    250                                      ; 判断程序大小
-   251 00000375 8B07                        mov eax, [edi]                          ; 内核程序大小
-   252 00000377 31D2                        xor edx, edx 
-   253 00000379 B900020000                  mov ecx, 512                            ; 每个扇区大小为 512
-   254 0000037E F7F1                        div ecx                                 ; 商存储在 eax 中, 余数存储在 edx 中
+   251 00000376 8B07                        mov eax, [edi]                          ; 内核程序大小
+   252 00000378 31D2                        xor edx, edx 
+   253 0000037A B900020000                  mov ecx, 512                            ; 每个扇区大小为 512
+   254 0000037F F7F1                        div ecx                                 ; 商存储在 eax 中, 余数存储在 edx 中
    255                                  
    256                                      ; 处理长度 < 512 字节的情况
-   257 00000380 09C0                        or eax, eax 
-   258 00000382 7419                        jz pge
+   257 00000381 09C0                        or eax, eax 
+   258 00000383 7419                        jz pge
    259                                      ; 处理长度 >= 512 字节的情况
-   260 00000384 09D2                        or edx, edx 
-   261 00000386 7505                        jnz @1
-   262 00000388 48                          dec eax 
-   263 00000389 09C0                        or eax, eax                             ; 正好为 512 时, 单独处理
-   264 0000038B 7410                        jz pge
+   260 00000385 09D2                        or edx, edx 
+   261 00000387 7505                        jnz @1
+   262 00000389 48                          dec eax 
+   263 0000038A 09C0                        or eax, eax                             ; 正好为 512 时, 单独处理
+   264 0000038C 7410                        jz pge
    265                                  @1:
    266                                      ; 读取剩余扇区
-   267 0000038D 89C1                        mov ecx, eax                            ; 循环次数
-   268 0000038F B809000000                  mov eax, COR_START_SECTOR
-   269 00000394 40                          inc eax 
+   267 0000038E 89C1                        mov ecx, eax                            ; 循环次数
+   268 00000390 B809000000                  mov eax, COR_START_SECTOR
+   269 00000395 40                          inc eax 
    270                                  @2:
-   271 00000395 E8D8010000                  call read_hard_disk_0
-   272 0000039A 40                          inc eax
-   273 0000039B E2F8                        loop @2
+   271 00000396 E8D8010000                  call read_hard_disk_0
+   272 0000039B 40                          inc eax
+   273 0000039C E2F8                        loop @2
    274                                  
    275                                  pge:
    276                                      ; 回填内核加载地址的物理地址到内核程序头部
-   277 0000039D C70508000200000002-         mov dword [CORE_PHY_ADDR + 0x08], CORE_PHY_ADDR
-   277 000003A6 00                 
-   278 000003A7 C7050C000200000000-         mov dword [CORE_PHY_ADDR + 0x0c], 0
-   278 000003B0 00                 
+   277 0000039E C70508000200000002-         mov dword [CORE_PHY_ADDR + 0x08], CORE_PHY_ADDR
+   277 000003A7 00                 
+   278 000003A8 C7050C000200000000-         mov dword [CORE_PHY_ADDR + 0x0c], 0
+   278 000003B1 00                 
    279                                  
    280                                      ; 创建 4 级分页系统, 只包含基本部分, 覆盖低端 1 MB物理内存
-   281 000003B1 BB00A00000                  mov ebx, PML4_PHY_ADDR                  ; 找个地方存四级页表
+   281 000003B2 BB00A00000                  mov ebx, PML4_PHY_ADDR                  ; 找个地方存四级页表
    282                                  
    283                                      ; 4 级页表清零
-   284 000003B6 B900040000                  mov ecx, 1024
-   285 000003BB 31F6                        xor esi, esi 
+   284 000003B7 B900040000                  mov ecx, 1024
+   285 000003BC 31F6                        xor esi, esi 
    286                                  .cls0:
-   287 000003BD C7043300000000              mov dword [ebx + esi], 0
-   288 000003C4 83C604                      add esi, 4
-   289 000003C7 E2F4                        loop .cls0
+   287 000003BE C7043300000000              mov dword [ebx + esi], 0
+   288 000003C5 83C604                      add esi, 4
+   289 000003C8 E2F4                        loop .cls0
    290                                  
    291                                      ; 在 4 级页表内最后一项存放自身地址, 这样可以通过虚拟地址访问表中最后一项来获取页表的真实地址
-   292 000003C9 C783F80F000003A000-         mov dword [ebx + 511 * 8], PML4_PHY_ADDR | 3    ; 添加属性
-   292 000003D2 00                 
-   293 000003D3 C783FC0F0000000000-         mov dword [ebx + 511 * 8 + 4], 0
-   293 000003DC 00                 
+   292 000003CA C783F80F000003A000-         mov dword [ebx + 511 * 8], PML4_PHY_ADDR | 3    ; 添加属性
+   292 000003D3 00                 
+   293 000003D4 C783FC0F0000000000-         mov dword [ebx + 511 * 8 + 4], 0
+   293 000003DD 00                 
    294                                  
    295                                      ; 映射虚拟地址与物理地址的低端 2 MB, 确保开启分页后也可以正常访问, 即地址经过页表转换后不变。
    296                                      ; 0x0000000000000000--0x00000000001FFFFF 低 48 位按 9 9 9 9 12 分割进行四级分页查表。而高 16 位无效, 填充符号位
-   297 000003DD C70303B00000                mov dword [ebx + 0 * 8], PDPT_PHY_ADDR  | 3     ; 添加属性
-   298 000003E3 C7430400000000              mov dword [ebx + 0 * 8 + 4], 0
+   297 000003DE C70303B00000                mov dword [ebx + 0 * 8], PDPT_PHY_ADDR  | 3     ; 添加属性
+   298 000003E4 C7430400000000              mov dword [ebx + 0 * 8 + 4], 0
    299                                  
    300                                      ; 将页目录指针表中的内容清 0
-   301 000003EA BB00B00000                  mov ebx, PDPT_PHY_ADDR
+   301 000003EB BB00B00000                  mov ebx, PDPT_PHY_ADDR
    302                                  
-   303 000003EF B900040000                  mov ecx, 1024
-   304 000003F4 31F6                        xor esi, esi 
+   303 000003F0 B900040000                  mov ecx, 1024
+   304 000003F5 31F6                        xor esi, esi 
    305                                  .cls1:
-   306 000003F6 C7043300000000              mov dword [ebx + esi], 0
-   307 000003FD 83C604                      add esi, 4
-   308 00000400 E2F4                        loop .cls1
+   306 000003F7 C7043300000000              mov dword [ebx + esi], 0
+   307 000003FE 83C604                      add esi, 4
+   308 00000401 E2F4                        loop .cls1
    309                                  
    310                                      ; 套娃, 创建下一级页表
-   311 00000402 C70303C00000                mov dword [ebx + 0 * 8], PDT_PHY_ADDR | 3
-   312 00000408 C7430400000000              mov dword [ebx + 0 * 8 + 4], 0
+   311 00000403 C70303C00000                mov dword [ebx + 0 * 8], PDT_PHY_ADDR | 3
+   312 00000409 C7430400000000              mov dword [ebx + 0 * 8 + 4], 0
    313                                  
    314                                      ; 清 0
-   315 0000040F BB00C00000                  mov ebx, PDT_PHY_ADDR
+   315 00000410 BB00C00000                  mov ebx, PDT_PHY_ADDR
    316                                  
-   317 00000414 B900040000                  mov ecx, 1024
-   318 00000419 31F6                        xor esi, esi
+   317 00000415 B900040000                  mov ecx, 1024
+   318 0000041A 31F6                        xor esi, esi
    319                                  .cls2:
-   320 0000041B C7043300000000              mov dword [ebx + esi], 0
-   321 00000422 83C604                      add esi, 4
-   322 00000425 E2F4                        loop .cls2
+   320 0000041C C7043300000000              mov dword [ebx + esi], 0
+   321 00000423 83C604                      add esi, 4
+   322 00000426 E2F4                        loop .cls2
    323                                  
    324                                      ; 在页目录表内创建与低端 2MB 对应的表项
-   325 00000427 C70383000000                mov dword [ebx + 0 * 8], 0 | 0x83       ; 位 7、R/W 位、P 位是 1, 其他全是 0
-   326 0000042D C7430400000000              mov dword [ebx + 0 * 8 + 4], 0
+   325 00000428 C70383000000                mov dword [ebx + 0 * 8], 0 | 0x83       ; 位 7、R/W 位、P 位是 1, 其他全是 0
+   326 0000042E C7430400000000              mov dword [ebx + 0 * 8 + 4], 0
    327                                  
    328                                      ; 将物理内存的低端 2MB 映射到线性地址空间的高端, 内核处于高地址, 要做一次重复映射。0xFFFF800000000000--0xFFFF8000001FFFFF
-   329 00000434 BB00A00000                  mov ebx, PML4_PHY_ADDR
+   329 00000435 BB00A00000                  mov ebx, PML4_PHY_ADDR
    330                                  
-   331 00000439 C7830008000003B000-         mov dword [ebx + 256 * 8], PDPT_PHY_ADDR | 3 ; 页目录表
-   331 00000442 00                 
-   332 00000443 C78304080000000000-         mov dword [ebx + 256 * 8 + 4], 0
-   332 0000044C 00                 
+   331 0000043A C7830008000003B000-         mov dword [ebx + 256 * 8], PDPT_PHY_ADDR | 3 ; 页目录表
+   331 00000443 00                 
+   332 00000444 C78304080000000000-         mov dword [ebx + 256 * 8 + 4], 0
+   332 0000044D 00                 
    333                                  
    334                                      ; 因为要为每个进程都给予一个独立的 4 级头表(可以理解为指针数组), 而内核空间是所有进程共享的, 要在每个进程独立
    335                                      ; 的 4 级头表中内核公共部分填入一样的数据。页表机制的一个特点是 就是动态分配, 用时间换空间, 为了避免此特性使
    336                                      ; 每个进程不停的去同步 4 级头表中内核公共部分, 索性直接将 4 级头表中内核公共部分全部预分配好。详细解释见书中 135 页。
-   337 0000044D B801010000                  mov eax, 257
-   338 00000452 BA03001000                  mov edx, COR_PDPT_ADDR | 3
+   337 0000044E B801010000                  mov eax, 257
+   338 00000453 BA03001000                  mov edx, COR_PDPT_ADDR | 3
    339                                  .fill_pml4:
-   340 00000457 8914C3                      mov dword [ebx + eax * 8], edx 
-   341 0000045A C744C30400000000            mov dword [ebx + eax * 8 + 4], 0
-   342 00000462 81C200100000                add edx, 0x1000
-   343 00000468 40                          inc eax 
-   344 00000469 3DFF010000                  cmp eax, 511
-   345 0000046E 72E7                        jb .fill_pml4
+   340 00000458 8914C3                      mov dword [ebx + eax * 8], edx 
+   341 0000045B C744C30400000000            mov dword [ebx + eax * 8 + 4], 0
+   342 00000463 81C200100000                add edx, 0x1000
+   343 00000469 40                          inc eax 
+   344 0000046A 3DFF010000                  cmp eax, 511
+   345 0000046F 72E7                        jb .fill_pml4
    346                                  
    347                                      ; 将预分配的页目录指针表全部清零
-   348 00000470 B800001000                  mov eax, COR_PDPT_ADDR
+   348 00000471 B800001000                  mov eax, COR_PDPT_ADDR
    349                                  .zero_pdpt:
-   350 00000475 C70000000000                mov dword [eax], 0
-   351 0000047B 83C004                      add eax, 4
-   352 0000047E 3D00E01F00                  cmp eax, COR_PDPT_ADDR + 0x1000 * 254
-   353 00000483 72F0                        jb .zero_pdpt
+   350 00000476 C70000000000                mov dword [eax], 0
+   351 0000047C 83C004                      add eax, 4
+   352 0000047F 3D00E01F00                  cmp eax, COR_PDPT_ADDR + 0x1000 * 254
+   353 00000484 72F0                        jb .zero_pdpt
    354                                  
    355                                      ; 将 cr3 寄存器指向 4 级头表
-   356 00000485 B800A00000                  mov eax, PML4_PHY_ADDR
-   357 0000048A 0F22D8                      mov cr3, eax 
+   356 00000486 B800A00000                  mov eax, PML4_PHY_ADDR
+   357 0000048B 0F22D8                      mov cr3, eax 
    358                                  
    359                                      ; 开启物理扩展 PAE
-   360 0000048D 0F20E0                      mov eax, cr4 
-   361 00000490 0FBAE805                    bts eax, 5                              ; 位测试并置位
-   362 00000494 0F22E0                      mov cr4, eax 
+   360 0000048E 0F20E0                      mov eax, cr4 
+   361 00000491 0FBAE805                    bts eax, 5                              ; 位测试并置位
+   362 00000495 0F22E0                      mov cr4, eax 
    363                                  
    364                                      ; 设置型号专属寄存器 IA32_EFER.LME, 允许 IA_32e 模式
-   365 00000497 B9800000C0                  mov ecx, 0x0c0000080                    ; 指定型号专属寄存器 IA32_EFER
-   366 0000049C 0F32                        rdmsr
-   367 0000049E 0FBAE808                    bts eax, 8                              ; 设置 LME 位
-   368 000004A2 0F30                        wrmsr 
+   365 00000498 B9800000C0                  mov ecx, 0x0c0000080                    ; 指定型号专属寄存器 IA32_EFER
+   366 0000049D 0F32                        rdmsr
+   367 0000049F 0FBAE808                    bts eax, 8                              ; 设置 LME 位
+   368 000004A3 0F30                        wrmsr 
    369                                  
    370                                      ; 开启分页功能
-   371 000004A4 0F20C0                      mov eax, cr0 
-   372 000004A7 0FBAE81F                    bts eax, 31                             ; 置位 cr0.PG
-   373 000004AB 0F22C0                      mov cr0, eax 
+   371 000004A5 0F20C0                      mov eax, cr0 
+   372 000004A8 0FBAE81F                    bts eax, 31                             ; 置位 cr0.PG
+   373 000004AC 0F22C0                      mov cr0, eax 
    374                                  
    375                                      ; 打印 IA_32e 激活信息
-   376 000004AE BB[37F10000]                mov ebx, ia_32e + LDR_PHY_ADDR
-   377 000004B3 E80F000000                  call put_string_flat32
+   376 000004AF BB[37F10000]                mov ebx, ia_32e + LDR_PHY_ADDR
+   377 000004B4 E80F000000                  call put_string_flat32
    378                                  
    379                                      ; 通过远返回的方式进入 64 位模式内核
-   380 000004B8 666A18                      push word CORE_CODE64_SEL
-   381 000004BB A104000200                  mov eax, dword [CORE_PHY_ADDR + 4]
-   382 000004C0 0500000200                  add eax, CORE_PHY_ADDR
-   383 000004C5 50                          push eax 
-   384 000004C6 CB                          retf                                    ; 压入 GDT 选择子和地址
+   380 000004B9 666A18                      push word CORE_CODE64_SEL
+   381 000004BC A104000200                  mov eax, dword [CORE_PHY_ADDR + 4]
+   382 000004C1 0500000200                  add eax, CORE_PHY_ADDR
+   383 000004C6 50                          push eax 
+   384 000004C7 CB                          retf                                    ; 压入 GDT 选择子和地址
    385                                  
    386                                  ; ------------------------------------------------------------
    387                                  ; put_string_flat32
@@ -486,21 +486,21 @@
    389                                  ; 输入: EBX=字符串的线性地址
    390                                  ; ------------------------------------------------------------
    391                                  put_string_flat32:
-   392 000004C7 53                          push ebx 
-   393 000004C8 51                          push ecx 
+   392 000004C8 53                          push ebx 
+   393 000004C9 51                          push ecx 
    394                                  .getc:
-   395 000004C9 8A0B                        mov cl, [ebx]
-   396 000004CB 08C9                        or cl, cl                               ; 检测串结束标志 0
-   397 000004CD 7408                        jz .exit                                
-   398 000004CF E806000000                  call put_char
-   399 000004D4 43                          inc ebx 
-   400 000004D5 EBF2                        jmp .getc
+   395 000004CA 8A0B                        mov cl, [ebx]
+   396 000004CC 08C9                        or cl, cl                               ; 检测串结束标志 0
+   397 000004CE 7408                        jz .exit                                
+   398 000004D0 E806000000                  call put_char
+   399 000004D5 43                          inc ebx 
+   400 000004D6 EBF2                        jmp .getc
    401                                  
    402                                  .exit:
-   403 000004D7 59                          pop ecx 
-   404 000004D8 5B                          pop ebx 
+   403 000004D8 59                          pop ecx 
+   404 000004D9 5B                          pop ebx 
    405                                  
-   406 000004D9 C3                          ret 
+   406 000004DA C3                          ret 
    407                                  
    408                                  ; ------------------------------------------------------------
    409                                  ; put_char
@@ -508,91 +508,91 @@
    411                                  ; 输入: CL=字符ASCII码
    412                                  ; ------------------------------------------------------------
    413                                  put_char:
-   414 000004DA 60                          pushad 
+   414 000004DB 60                          pushad 
    415                                  
-   416 000004DB 66BAD403                    mov dx, 0x3d4                           ; 0x3d4 是 VGA 显卡的索引寄存器端口地址, 用于指定要操作的显卡寄存器。
-   417 000004DF B00E                        mov al, 0xe                             ; 0xe 是显卡的光标位置寄存器的索引值, 用于读取光标的高字节位置。
-   418 000004E1 EE                          out dx, al                              ; 将 0xe 输出到端口 0x3d4, 
-   419 000004E2 6642                        inc dx                                  ; 0x3d5 是显卡的数据寄存器端口地址, 用于读取或写入显卡寄存器的实际数据。
-   420 000004E4 EC                          in al, dx                               ; 从端口 0x3d5 读取数据到 al, 读取了光标位置的高字节
+   416 000004DC 66BAD403                    mov dx, 0x3d4                           ; 0x3d4 是 VGA 显卡的索引寄存器端口地址, 用于指定要操作的显卡寄存器。
+   417 000004E0 B00E                        mov al, 0xe                             ; 0xe 是显卡的光标位置寄存器的索引值, 用于读取光标的高字节位置。
+   418 000004E2 EE                          out dx, al                              ; 将 0xe 输出到端口 0x3d4, 
+   419 000004E3 6642                        inc dx                                  ; 0x3d5 是显卡的数据寄存器端口地址, 用于读取或写入显卡寄存器的实际数据。
+   420 000004E5 EC                          in al, dx                               ; 从端口 0x3d5 读取数据到 al, 读取了光标位置的高字节
    421                                  
-   422 000004E5 88C4                        mov ah, al                              ; 存入 ah 
+   422 000004E6 88C4                        mov ah, al                              ; 存入 ah 
    423                                  
-   424 000004E7 664A                        dec dx                                  ; 同上, 再获取低字节
-   425 000004E9 B00F                        mov al, 0x0f                            ; 0x0f 是显卡的光标位置寄存器的索引值, 用于读取光标的低字节位置。
-   426 000004EB EE                          out dx, al 
-   427 000004EC 6642                        inc dx 
-   428 000004EE EC                          in al, dx 
+   424 000004E8 664A                        dec dx                                  ; 同上, 再获取低字节
+   425 000004EA B00F                        mov al, 0x0f                            ; 0x0f 是显卡的光标位置寄存器的索引值, 用于读取光标的低字节位置。
+   426 000004EC EE                          out dx, al 
+   427 000004ED 6642                        inc dx 
+   428 000004EF EC                          in al, dx 
    429                                  
-   430 000004EF 6689C3                      mov bx, ax                              ; 此时 bx 中存储了字符的数目, 一个字符占两个字节
-   431 000004F2 81E2FFFF0000                and edx, 0x0000ffff
+   430 000004F0 6689C3                      mov bx, ax                              ; 此时 bx 中存储了字符的数目, 一个字符占两个字节
+   431 000004F3 81E2FFFF0000                and edx, 0x0000ffff
    432                                  
-   433 000004F8 80F90D                      cmp cl, 0x0d                            ; 回车符?
-   434 000004FB 750E                        jnz .put_0a                             ; 不是回车符检查是不是换行符(0x0a)
+   433 000004F9 80F90D                      cmp cl, 0x0d                            ; 回车符?
+   434 000004FC 750E                        jnz .put_0a                             ; 不是回车符检查是不是换行符(0x0a)
    435                                  
-   436 000004FD 6689D8                      mov ax, bx                              ; 处理回车符
-   437 00000500 B350                        mov bl, 80                              ; 行宽 80
-   438 00000502 F6F3                        div bl 
-   439 00000504 F6E3                        mul bl                                  ; 移到本行起始
-   440 00000506 6689C3                      mov bx, ax 
-   441 00000509 EB19                        jmp .roll_screen
+   436 000004FE 6689D8                      mov ax, bx                              ; 处理回车符
+   437 00000501 B350                        mov bl, 80                              ; 行宽 80
+   438 00000503 F6F3                        div bl 
+   439 00000505 F6E3                        mul bl                                  ; 移到本行起始
+   440 00000507 6689C3                      mov bx, ax 
+   441 0000050A EB19                        jmp .roll_screen
    442                                  
    443                                  .put_0a:
-   444 0000050B 80F90A                      cmp cl, 0x0a                            ; 换行符?
-   445 0000050E 7506                        jnz .put_other
+   444 0000050C 80F90A                      cmp cl, 0x0a                            ; 换行符?
+   445 0000050F 7506                        jnz .put_other
    446                                  
-   447 00000510 6683C350                    add bx, 80                              ; 处理换行符
-   448 00000514 EB0E                        jmp .roll_screen
+   447 00000511 6683C350                    add bx, 80                              ; 处理换行符
+   448 00000515 EB0E                        jmp .roll_screen
    449                                  
    450                                  .put_other:                                 ; 显示字符
-   451 00000516 66D1E3                      shl bx, 1                               ; 在文本模式下, 显存中每个字符占用 2 个字节, 左移 1 位相当于将 bx 的值乘以 2, 从而将光标位置从字符索引转换为显存中的字节偏移量。
-   452 00000519 888B00800B00                mov [0xb8000 + ebx], cl                 ; 0xb800:0000(0xb8000) 是显存的起始地址
+   451 00000517 66D1E3                      shl bx, 1                               ; 在文本模式下, 显存中每个字符占用 2 个字节, 左移 1 位相当于将 bx 的值乘以 2, 从而将光标位置从字符索引转换为显存中的字节偏移量。
+   452 0000051A 888B00800B00                mov [0xb8000 + ebx], cl                 ; 0xb800:0000(0xb8000) 是显存的起始地址
    453                                  
-   454 0000051F 66D1EB                      shr bx, 1                               ; 将光标位置移到下一个字符
-   455 00000522 6643                        inc bx      
+   454 00000520 66D1EB                      shr bx, 1                               ; 将光标位置移到下一个字符
+   455 00000523 6643                        inc bx      
    456                                  
    457                                  .roll_screen:
-   458 00000524 6681FBD007                  cmp bx, 2000                            ; 超出屏幕外? 
-   459 00000529 7C2F                        jl .set_cursor                          ; 设置光标
+   458 00000525 6681FBD007                  cmp bx, 2000                            ; 超出屏幕外? 
+   459 0000052A 7C2F                        jl .set_cursor                          ; 设置光标
    460                                  
    461                                      ; 滚屏处理
-   462 0000052B 53                          push ebx                                ; 保存光标位置               
+   462 0000052C 53                          push ebx                                ; 保存光标位置               
    463                                  
-   464 0000052C FC                          cld                                     ; 清除方向标志
-   465 0000052D BEA0800B00                  mov esi, 0xb80a0                        ; 0xb80a0 是显存中第 2 行字符的起始地址。源地址
-   466 00000532 BF00800B00                  mov edi, 0xb8000                        ; 0xb8000 是显存起始地址。目标地址
-   467 00000537 B9C0030000                  mov ecx, 960                            ; 960 == 24 x 80 x 2 / 4, 滚屏操作需要将第 2 行到第 25 行的内容向上移动一行, 覆盖第 1 行的内容。
-   468 0000053C F3A5                        rep movsd                               ; rep movsd 会根据 ecx 的值重复移动数据, 直到 ecx 为 0。每次移动 4 个字节
+   464 0000052D FC                          cld                                     ; 清除方向标志
+   465 0000052E BEA0800B00                  mov esi, 0xb80a0                        ; 0xb80a0 是显存中第 2 行字符的起始地址。源地址
+   466 00000533 BF00800B00                  mov edi, 0xb8000                        ; 0xb8000 是显存起始地址。目标地址
+   467 00000538 B9C0030000                  mov ecx, 960                            ; 960 == 24 x 80 x 2 / 4, 滚屏操作需要将第 2 行到第 25 行的内容向上移动一行, 覆盖第 1 行的内容。
+   468 0000053D F3A5                        rep movsd                               ; rep movsd 会根据 ecx 的值重复移动数据, 直到 ecx 为 0。每次移动 4 个字节
    469                                      
    470                                      ; 清除屏幕最后一行
-   471 0000053E BB000F0000                  mov ebx, 3840                           ; 3840 == 24 x 80 x 2, 设置光标位置为屏幕最后一行的起始位置。
-   472 00000543 B950000000                  mov ecx, 80                             ; ecx 是循环次数
+   471 0000053F BB000F0000                  mov ebx, 3840                           ; 3840 == 24 x 80 x 2, 设置光标位置为屏幕最后一行的起始位置。
+   472 00000544 B950000000                  mov ecx, 80                             ; ecx 是循环次数
    473                                  
    474                                  .cls:
-   475 00000548 66C78300800B002007          mov word[0xb8000 + ebx], 0x0720         ; 0x0720 是空格字符, 黑色背景
-   476 00000551 83C302                      add ebx, 2
-   477 00000554 E2F2                        loop .cls 
+   475 00000549 66C78300800B002007          mov word[0xb8000 + ebx], 0x0720         ; 0x0720 是空格字符, 黑色背景
+   476 00000552 83C302                      add ebx, 2
+   477 00000555 E2F2                        loop .cls 
    478                                  
-   479 00000556 5B                          pop ebx                                 ; 恢复光标
-   480 00000557 83EB50                      sub ebx, 80                             ; 上移一行
+   479 00000557 5B                          pop ebx                                 ; 恢复光标
+   480 00000558 83EB50                      sub ebx, 80                             ; 上移一行
    481                                  
    482                                  .set_cursor:                                ; 设置光标
-   483 0000055A 66BAD403                    mov dx, 0x3d4
-   484 0000055E B00E                        mov al, 0x0e
-   485 00000560 EE                          out dx, al
-   486 00000561 6642                        inc dx 
-   487 00000563 88F8                        mov al, bh 
-   488 00000565 EE                          out dx, al 
+   483 0000055B 66BAD403                    mov dx, 0x3d4
+   484 0000055F B00E                        mov al, 0x0e
+   485 00000561 EE                          out dx, al
+   486 00000562 6642                        inc dx 
+   487 00000564 88F8                        mov al, bh 
+   488 00000566 EE                          out dx, al 
    489                                  
-   490 00000566 664A                        dec dx 
-   491 00000568 B00F                        mov al, 0x0f
-   492 0000056A EE                          out dx, al 
-   493 0000056B 6642                        inc dx 
-   494 0000056D 88D8                        mov al, bl 
-   495 0000056F EE                          out dx, al 
+   490 00000567 664A                        dec dx 
+   491 00000569 B00F                        mov al, 0x0f
+   492 0000056B EE                          out dx, al 
+   493 0000056C 6642                        inc dx 
+   494 0000056E 88D8                        mov al, bl 
+   495 00000570 EE                          out dx, al 
    496                                  
-   497 00000570 61                          popad 
-   498 00000571 C3                          ret 
+   497 00000571 61                          popad 
+   498 00000572 C3                          ret 
    499                                  
    500                                  ; ------------------------------------------------------------
    501                                  ; read_hard_disk_0
@@ -601,57 +601,57 @@
    504                                  ; 返回: ebx = ebx + 512
    505                                  ; ------------------------------------------------------------
    506                                  read_hard_disk_0:
-   507 00000572 50                          push eax
-   508 00000573 51                          push ecx
-   509 00000574 52                          push edx 
+   507 00000573 50                          push eax
+   508 00000574 51                          push ecx
+   509 00000575 52                          push edx 
    510                                  
-   511 00000575 50                          push eax 
+   511 00000576 50                          push eax 
    512                                  
-   513 00000576 66BAF201                    mov dx, 0x1f2                           ; 0x1f2 是硬盘控制器的一个端口地址, 用于指定要读取的扇区数量。
-   514 0000057A B001                        mov al, 1
-   515 0000057C EE                          out dx, al                              ; 将 1 写入到硬盘控制器的端口 0x1f2, 告诉硬盘控制器接下来要读取一个扇区。
+   513 00000577 66BAF201                    mov dx, 0x1f2                           ; 0x1f2 是硬盘控制器的一个端口地址, 用于指定要读取的扇区数量。
+   514 0000057B B001                        mov al, 1
+   515 0000057D EE                          out dx, al                              ; 将 1 写入到硬盘控制器的端口 0x1f2, 告诉硬盘控制器接下来要读取一个扇区。
    516                                  
-   517 0000057D 6642                        inc dx                                  ; 0x1f3
-   518 0000057F 58                          pop eax 
-   519 00000580 EE                          out dx, al                              ; LBA 地址 7 ~ 0
+   517 0000057E 6642                        inc dx                                  ; 0x1f3
+   518 00000580 58                          pop eax 
+   519 00000581 EE                          out dx, al                              ; LBA 地址 7 ~ 0
    520                                  
-   521 00000581 6642                        inc dx                                  ; 0x1f4
-   522 00000583 B108                        mov cl, 8
-   523 00000585 D3E8                        shr eax, cl 
-   524 00000587 EE                          out dx, al                              ; LBA 地址 15 ~ 8
+   521 00000582 6642                        inc dx                                  ; 0x1f4
+   522 00000584 B108                        mov cl, 8
+   523 00000586 D3E8                        shr eax, cl 
+   524 00000588 EE                          out dx, al                              ; LBA 地址 15 ~ 8
    525                                  
-   526 00000588 6642                        inc dx                                  ; 0x1f5
-   527 0000058A D3E8                        shr eax, cl 
-   528 0000058C EE                          out dx, al                              ; LBA 地址 23 ~ 16
+   526 00000589 6642                        inc dx                                  ; 0x1f5
+   527 0000058B D3E8                        shr eax, cl 
+   528 0000058D EE                          out dx, al                              ; LBA 地址 23 ~ 16
    529                                  
-   530 0000058D 6642                        inc dx                                  ; 0x1f6
-   531 0000058F D3E8                        shr eax, cl 
-   532 00000591 0CE0                        or al, 0xe0                             ; 第一硬盘
-   533 00000593 EE                          out dx, al                              ; LBA 地址 27 ~ 24
+   530 0000058E 6642                        inc dx                                  ; 0x1f6
+   531 00000590 D3E8                        shr eax, cl 
+   532 00000592 0CE0                        or al, 0xe0                             ; 第一硬盘
+   533 00000594 EE                          out dx, al                              ; LBA 地址 27 ~ 24
    534                                  
-   535 00000594 6642                        inc dx                                  ; 0x1f7
-   536 00000596 B020                        mov al, 0x20    
-   537 00000598 EE                          out dx, al                              ; 读命令
+   535 00000595 6642                        inc dx                                  ; 0x1f7
+   536 00000597 B020                        mov al, 0x20    
+   537 00000599 EE                          out dx, al                              ; 读命令
    538                                  
    539                                  .waits:
-   540 00000599 EC                          in al, dx 
-   541 0000059A A808                        test al, 8
-   542 0000059C 74FB                        jz .waits                               ; 忙或数据还没准备好, 循环查询
+   540 0000059A EC                          in al, dx 
+   541 0000059B A808                        test al, 8
+   542 0000059D 74FB                        jz .waits                               ; 忙或数据还没准备好, 循环查询
    543                                  
-   544 0000059E B900010000                  mov ecx, 256                            ; 总共要读取的字数, 循环次数
-   545 000005A3 66BAF001                    mov dx, 0x1f0
+   544 0000059F B900010000                  mov ecx, 256                            ; 总共要读取的字数, 循环次数
+   545 000005A4 66BAF001                    mov dx, 0x1f0
    546                                  
    547                                  .readw:
-   548 000005A7 66ED                        in ax, dx                               ; 循环去读硬盘数据写入指定内存
-   549 000005A9 668903                      mov [ebx], ax 
-   550 000005AC 83C302                      add ebx, 2
-   551 000005AF E2F6                        loop .readw
+   548 000005A8 66ED                        in ax, dx                               ; 循环去读硬盘数据写入指定内存
+   549 000005AA 668903                      mov [ebx], ax 
+   550 000005AD 83C302                      add ebx, 2
+   551 000005B0 E2F6                        loop .readw
    552                                  
-   553 000005B1 5A                          pop edx 
-   554 000005B2 59                          pop ecx 
-   555 000005B3 58                          pop eax 
+   553 000005B2 5A                          pop edx 
+   554 000005B3 59                          pop ecx 
+   555 000005B4 58                          pop eax 
    556                                  
-   557 000005B4 C3                          ret 
+   557 000005B5 C3                          ret 
    558                                  
    559                                  SECTION trail
    560                                      ldr_end:
