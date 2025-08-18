@@ -1,23 +1,26 @@
      1                                  ; shell 程序
      2                                  
      3                                  section shell_header                                ; 外壳程序头部
-     4 00000000 [0D01000000000000]          length  dq shell_end                            ; #0: 外壳程序的总长度（字节数）
-     5 00000008 [0801000000000000]          entry   dq start                                ; #8: 外壳入口点
+     4 00000000 [3701000000000000]          length  dq shell_end                            ; #0: 外壳程序的总长度（字节数）
+     5 00000008 [3201000000000000]          entry   dq start                                ; #8: 外壳入口点
      6 00000010 0000000000000000            linear  dq 0                                    ; #16: 外壳加载的虚拟（线性）地址
      7                                  
      8                                  section shell_data                                  ; 外壳程序数据段
      9 00000000 00<rep 80h>                 shell_msg   times 128 db 0
     10                                  
-    11 00000080 4F53205348454C4C20-         msg0        db "OS SHELL on CPU ", 0
-    11 00000089 6F6E204350552000   
-    12 00000091 00<rep 20h>                 pcpu        times 32 db 0                       ; 处理器编号的文本
-    13 000000B1 202D00                      msg1        db " -", 0
-    14                                  
-    15 000000B4 00<rep 20h>                 time_buff    times 32 db 0                      ; 当前时间的文本
+    11 00000080 5468726561642000            msg0        db "Thread ", 0
+    12 00000088 00<rep 20h>                 tid         times 32 db 0                       ; 线程ID的文本
+    13 000000A8 203C4F53205348454C-         msg1        db " <OS SHELL> on CPU ", 0
+    13 000000B1 4C3E206F6E20435055-
+    13 000000BA 2000               
+    14 000000BC 00<rep 20h>                 pcpu        times 32 db 0                       ; 处理器编号的文本
+    15 000000DC 202D00                      msg2        db " -", 0
     16                                  
-    17                                  section shell_code                                  ; 外壳程序代码段
+    17 000000DF 00<rep 20h>                 time_buff   times 32 db 0                       ; 当前时间的文本
     18                                  
-    19                                  %include "./common/user_static64.asm"
+    19                                  section shell_code                                  ; 外壳程序代码段
+    20                                  
+    21                                  %include "./common/user_static64.asm"
      1                              <1> ; 用户通用代码
      2                              <1> 
      3                              <1>     bits 64 
@@ -104,63 +107,70 @@
     84 00000067 58                  <1>     pop rax 
     85                              <1> 
     86 00000068 C3                  <1>     ret 
-    20                                  
-    21                                      bits 64 
     22                                  
-    23                                  main: 
-    24                                      ; 以下运行 8 个程序
-    25 00000069 41B864000000                mov r8, 100                                     ; LBA 为 100 的位置
-    26 0000006F B803000000                  mov rax, 3                                      ; 创建进程
-    27 00000074 0F05                        syscall
-    28 00000076 0F05                        syscall
-    29 00000078 0F05                        syscall      
-    30 0000007A 0F05                        syscall
-    31 0000007C 0F05                        syscall
-    32 0000007E 0F05                        syscall
-    33 00000080 0F05                        syscall
-    34 00000082 0F05                        syscall
-    35                                                            
-    36 00000084 B800000000                  mov rax, 0                                      ; 可用行号, dh=行号
-    37 00000089 0F05                        syscall                 
-    38 0000008B B200                        mov dl, 0
-    39 0000008D 41B15F                      mov r9b, 0x5f 
-    40                                  
-    41 00000090 4C8B25(10000000)            mov r12, [rel linear]
-    42                                  
-    43                                  _time:
-    44 00000097 498D9C24[B4000000]          lea rbx, [r12 + time_buff]
-    45 0000009F B801000000                  mov rax, 1                                      ; 返回当前时间
-    46 000000A4 0F05                        syscall 
-    47                                  
-    48 000000A6 B806000000                  mov rax, 6                                      ; 获取当前处理器编号
-    49 000000AB 0F05                        syscall
-    50 000000AD 4989C0                      mov r8, rax 
-    51 000000B0 498D9C24[91000000]          lea rbx, [r12 + pcpu]
-    52 000000B8 E843FFFFFF                  call bin64_to_dec
-    53                                  
-    54 000000BD 498DBC24[00000000]          lea rdi, [r12 + shell_msg]
-    55 000000C5 C60700                      mov byte [rdi], 0
+    23                                      bits 64 
+    24                                  
+    25                                  main: 
+    26                                      ; 以下运行 3 个程序
+    27 00000069 41B864000000                mov r8, 100                                     ; LBA 为 100 的位置
+    28 0000006F B803000000                  mov rax, 3                                      ; 创建进程
+    29 00000074 0F05                        syscall
+    30 00000076 0F05                        syscall
+    31 00000078 0F05                        syscall
+    32                                                            
+    33 0000007A B800000000                  mov rax, 0                                      ; 可用行号, dh=行号
+    34 0000007F 0F05                        syscall                 
+    35 00000081 B200                        mov dl, 0
+    36 00000083 41B15F                      mov r9b, 0x5f 
+    37                                  
+    38 00000086 4C8B25(10000000)            mov r12, [rel linear]
+    39                                  
+    40                                  _time:
+    41 0000008D 498D9C24[DF000000]          lea rbx, [r12 + time_buff]
+    42 00000095 B801000000                  mov rax, 1                                      ; 返回当前时间
+    43 0000009A 0F05                        syscall 
+    44                                  
+    45 0000009C B806000000                  mov rax, 6                                      ; 获取当前处理器编号
+    46 000000A1 0F05                        syscall
+    47 000000A3 4989C0                      mov r8, rax 
+    48 000000A6 498D9C24[BC000000]          lea rbx, [r12 + pcpu]
+    49 000000AE E84DFFFFFF                  call bin64_to_dec
+    50                                  
+    51 000000B3 B808000000                  mov rax, 8
+    52 000000B8 0F05                        syscall
+    53 000000BA 4989C0                      mov r8, rax 
+    54 000000BD 498D9C24[88000000]          lea rbx, [r12 + tid]
+    55 000000C5 E836FFFFFF                  call bin64_to_dec                               ; 获取线程标识
     56                                  
-    57 000000C8 498DB424[80000000]          lea rsi, [r12 + msg0]
-    58 000000D0 E873FFFFFF                  call string_concatenates
+    57 000000CA 498DBC24[00000000]          lea rdi, [r12 + shell_msg]
+    58 000000D2 C60700                      mov byte [rdi], 0
     59                                  
-    60 000000D5 498DB424[91000000]          lea rsi, [r12 + pcpu]
+    60 000000D5 498DB424[80000000]          lea rsi, [r12 + msg0]
     61 000000DD E866FFFFFF                  call string_concatenates
     62                                  
-    63 000000E2 498DB424[B1000000]          lea rsi, [r12 + msg1]
+    63 000000E2 498DB424[88000000]          lea rsi, [r12 + tid]
     64 000000EA E859FFFFFF                  call string_concatenates
     65                                  
-    66 000000EF 498DB424[B4000000]          lea rsi, [r12 + time_buff]
+    66 000000EF 498DB424[A8000000]          lea rsi, [r12 + msg1]
     67 000000F7 E84CFFFFFF                  call string_concatenates
     68                                  
-    69 000000FC 4889FB                      mov rbx, rdi 
-    70 000000FF B802000000                  mov rax, 2                                      ; 打印字符串
-    71 00000104 0F05                        syscall
-    72                                  
-    73 00000106 EB8F                        jmp _time
+    69 000000FC 498DB424[BC000000]          lea rsi, [r12 + pcpu]
+    70 00000104 E83FFFFFFF                  call string_concatenates
+    71                                  
+    72 00000109 498DB424[DC000000]          lea rsi, [r12 + msg2]
+    73 00000111 E832FFFFFF                  call string_concatenates
     74                                  
-    75                                  start:
-    76 00000108 E85CFFFFFF                  call main 
+    75 00000116 498DB424[DF000000]          lea rsi, [r12 + time_buff]
+    76 0000011E E825FFFFFF                  call string_concatenates
     77                                  
-    78                                  
-    79                                  shell_end:
+    78 00000123 4889FB                      mov rbx, rdi 
+    79 00000126 B802000000                  mov rax, 2                                      ; 打印字符串
+    80 0000012B 0F05                        syscall
+    81                                  
+    82 0000012D E95BFFFFFF                  jmp _time
+    83                                  
+    84                                  start:
+    85 00000132 E832FFFFFF                  call main 
+    86                                  
+    87                                  
+    88                                  shell_end:

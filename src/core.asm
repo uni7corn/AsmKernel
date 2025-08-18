@@ -26,13 +26,17 @@ SECTION core_data                                   ; 内核数据段
 
     buffer      times 256 db 0
 
-    sys_entry   dq get_screen_row
-                dq get_cmos_time
-                dq put_cstringxy64
-                dq create_process
-                dq get_current_pid
-                dq terminate_process
-                dq get_cpu_number
+    sys_entry   dq get_screen_row                   ; #0
+                dq get_cmos_time                    ; #1
+                dq put_cstringxy64                  ; #2
+                dq create_process                   ; #3
+                dq get_current_pid                  ; #4
+                dq terminate_process                ; #5
+                dq get_cpu_number                   ; #6
+                dq create_thread                    ; #7
+                dq get_current_tid                  ; #8
+                dq thread_exit                      ; #9
+                dq memory_allocate                  ; #10
     pcb_ptr     dq 0                                ; 进程控制块PCB首节点的线性地址
 
 
@@ -163,11 +167,11 @@ general_exception_handler:
 exceptm         db "A exception raised, halt.", 0   ; 发生异常时的错误信息
 
 ; ------------------------------------------------------------
-; search_for_a_ready_task
-; 功能: 查找一个就绪的任务并将其置为忙, 本程序在中断处理过程内调用，默认中断是关闭状态。
-; 输出: r11=就绪任务的 PCB 线性地址
+; search_for_a_ready_thread
+; 功能: 查找一个就绪的线程并将其置为忙, 本程序在中断处理过程内调用，默认中断是关闭状态。
+; 输出: r11=就绪线程所属任务的 PCB 线性地址, r12=就绪线程的 TCB 线性地址
 ; ------------------------------------------------------------
-search_for_a_ready_task:
+search_for_a_ready_thread:
     push rax 
     push rbx 
     push rcx 
@@ -176,37 +180,50 @@ search_for_a_ready_task:
 
     swapgs 
     mov rbx, [gs:8]                                 ; 取得当前任务的 PCB 线性地址
+    mov r12, [gs:32]                                ; 取得当前线程的 TCB 地址
     swapgs
     mov r11, rbx 
     cmp rbx, 0                                      ; 专属数据区存的 PCB 线性地址为 0, 也就是刚初始化
-    jne .again
+    jne .nextt
     mov rbx, [rel pcb_ptr]                          ; 那就从链表头部开始找
     mov r11, rbx 
-.again:
-    mov r11, [r11 + 280]                            ; 取得下一个节点
+    mov r12, [r11 + 272]                            ; 从 PCB 的第一个 TCB 开始
+
+.nextt:                                             ; 这一部分遍历 TCB 链表
+    cmp r12, 0                                      ; 位于 TCB 链表的末尾?
+    je .nextp                                       ; 切换下一个 PCB
     xor rax, rax 
-    lock cmpxchg [r11 + 16], rcx                    ; 原子操作, 详情见 374 页
+    lock cmpxchg [r12 + 16], rcx 
     jz .return
+    mov r12, [r12 + 280]                            ; 获取下个 TCB
+    jmp .nextt
+
+.nextp:                                             ; 这一部分遍历 PCB 链表
+    mov r11, [r11 + 280]
     cmp r11, rbx                                    ; 是否转一圈回到当前节点?
     je .fmiss                                       ; 是, 未找到就绪任务
-    jmp .again
+    mov r12, [r11 + 272]                            ; 不是, 从新的 PCB 中提取 TCB 节点
+    jmp .nextt
 
 .fmiss:
     xor r11, r11 
+    xor r12, r12 
+
 .return:
     pop rcx 
     pop rbx 
     pop rax 
+
     ret 
 
 ; ------------------------------------------------------------
-; resume_execute_a_task
-; 功能: 恢复执行一个任务
-; 输入: r11=指定任务的 PCB 线性地址, 本程序在中断处理过程内调用，默认中断是关闭状态。
+; resume_execute_a_thread
+; 功能: 恢复执行一个线程, 本程序在中断处理过程内调用，默认中断是关闭状态。
+; 输入: r11=线程所属的任务的 PCB 线性地址, r12=线程的 TCB 线性地址
 ; ------------------------------------------------------------
-resume_execute_a_task:
+resume_execute_a_thread:
     mov eax, [rel clocks_1ms]                       ; 以下计算新任务运行时间
-    mov ebx, [r11 + 240]                            ; 任务制定的时间片
+    mov ebx, [r12 + 240]                            ; 线程指定的时间片
     mul ebx 
 
     mov rsi, LAPIC_START_ADDR
@@ -217,38 +234,39 @@ resume_execute_a_task:
     mov cr3, rbx                                    ; 切换地址空间
 
     swapgs
-    mov [gs:8], r11                                 ; 将新任务设置为当前任务
-    ; mov qword [r11 + 16], 1                         ; 置任务状态为忙, 在 lock cmpxchg [r11 + 16], rcx 中已经被设置
-    mov rbx, [r11 + 32]                             ; 取 PCB 中的 RSP0
+    mov [gs:8], r11                                 ; 将新线程所属的任务设置为当前任务
+    mov [gs:32], r12                                ; 将新线程设置为当前线程
+    mov rbx, [r12 + 32]                             ; 取 TCB 中的 RSP0
     mov [gs:128 + 4], rbx                           ; 置 TSS 中的 RSP0
     swapgs
 
-    mov rcx, [r11 + 80]
-    mov rdx, [r11 + 88]
-    mov rdi, [r11 + 104]
-    mov rbp, [r11 + 112]
-    mov rsp, [r11 + 120]
-    mov r8, [r11 + 128]
-    mov r9, [r11 + 136]
-    mov r10, [r11 + 144]
-    mov r12, [r11 + 160]
-    mov r13, [r11 + 168]
-    mov r14, [r11 + 176]
-    mov r15, [r11 + 184]
-    push qword [r11 + 208]                          ; SS
-    push qword [r11 + 120]                          ; RSP
-    push qword [r11 + 232]                          ; RFLAGS
-    push qword [r11 + 200]                          ; CS
-    push qword [r11 + 192]                          ; RIP
+    mov rcx, [r12 + 80]
+    mov rdx, [r12 + 88]
+    mov rdi, [r12 + 104]
+    mov rbp, [r12 + 112]
+    mov rsp, [r12 + 120]
+    mov r8, [r12 + 128]
+    mov r9, [r12 + 136]
+    mov r10, [r12 + 144]
+
+    mov r13, [r12 + 168]
+    mov r14, [r12 + 176]
+    mov r15, [r12 + 184]
+    push qword [r12 + 208]                          ; SS
+    push qword [r12 + 120]                          ; RSP
+    push qword [r12 + 232]                          ; RFLAGS
+    push qword [r12 + 200]                          ; CS
+    push qword [r12 + 192]                          ; RIP
 
     mov dword [rsi + 0x380], eax                    ; 开始计时
 
-    mov rax, [r11 + 64]
-    mov rbx, [r11 + 72]
-    mov rsi, [r11 + 96]
-    mov r11, [r11 + 152]
+    mov rax, [r12 + 64]
+    mov rbx, [r12 + 72]
+    mov rsi, [r12 + 96]
+    mov r11, [r12 + 152]
+    mov r12, [r12 + 160]
 
-    iretq                                           ; 转入新任务的空间执行
+    iretq                                           ; 转入新线程执行
 
 ; ------------------------------------------------------------
 ; time_slice_out_handler
@@ -258,50 +276,52 @@ time_slice_out_handler:
     push rax
     push rbx 
     push r11 
+    push r12
+    push r13 
 
     mov r11, LAPIC_START_ADDR                       ; 给 Local APIC 发送中断结束命令 EOI
     mov dword [r11 + 0xb0], 0
 
-    call search_for_a_ready_task
+    call search_for_a_ready_thread
     or r11, r11 
     jz .return                                      ; 未找到就绪任务
 
     swapgs
     mov rax, qword [gs:8]                           ; 当前任务的 PCB 线性地址
+    mov rbx, qword [gs:32]                          ; 当前线程的 TCB 线性地址
     swapgs
 
-    ; 保存当前任务的状态以便将来恢复执行。
-    mov rbx, cr3                                    ; 保存原任务的分页系统
-    mov qword [rax + 56], rbx
-    ; mov [rax + 64], rax                            ; 不需设置，将来恢复执行时从栈中弹出
-    ; mov [rax + 72], rbx                            ; 不需设置，将来恢复执行时从栈中弹出
-    mov [rax + 80], rcx
-    mov [rax + 88], rdx
-    mov [rax + 96], rsi
-    mov [rax + 104], rdi
-    mov [rax + 112], rbp
-    mov [rax + 120], rsp
-    mov [rax + 128], r8
-    mov [rax + 136], r9
-    mov [rax + 144], r10
-    ;mov [rax + 152], r11                           ; 不需设置，将来恢复执行时从栈中弹出
-    mov [rax + 160], r12
-    mov [rax + 168], r13
-    mov [rax + 176], r14
-    mov [rax + 184], r15
-    mov rbx, [rel position]
-    lea rbx, [rbx + .return]                        ; 将来恢复执行时，是从中断返回
-    mov [rax + 192], rbx                            ; RIP域为中断返回点
-    mov [rax + 200], cs
-    mov [rax + 208], ss
+    ; 保存当前任务和线程的状态以便将来恢复执行。
+    mov r13, cr3                                    ; 保存原任务的分页系统
+    mov qword [rax + 56], r13
+    ; rax 和 rbx 不需要保存，将来恢复执行时从栈中弹出
+    mov [rbx + 80], rcx
+    mov [rbx + 88], rdx
+    mov [rbx + 96], rsi
+    mov [rbx + 104], rdi
+    mov [rbx + 112], rbp
+    mov [rbx + 120], rsp
+    mov [rbx + 128], r8
+    mov [rbx + 136], r9
+    mov [rbx + 144], r10
+    ; r11、r12和 r13 不需要设置，将来恢复执行时从栈中弹出
+    mov [rbx + 176], r14
+    mov [rbx + 184], r15
+    mov r13, [rel position]
+    lea r13, [r13 + .return]                        ; 将来恢复执行时，是从中断返回也～
+    mov [rbx + 192], r13                            ; rip 域为中断返回点
+    mov [rbx + 200], cs
+    mov [rbx + 208], ss
     pushfq
-    pop qword [rax + 232]
+    pop qword [rbx + 232]
 
-    mov qword [rax + 16], 0                         ; 置任务状态为就绪
+    mov qword [rbx + 16], 0                         ; 置线程状态为就绪
 
-    jmp resume_execute_a_task                       ; 恢复并执行新任务
+    jmp resume_execute_a_thread                     ; 恢复并执行新线程
 
 .return:
+    pop r13
+    pop r12 
     pop r11
     pop rbx 
     pop rax 
@@ -314,6 +334,7 @@ time_slice_out_handler:
 new_task_notify_handler:
     push rsi 
     push r11 
+    push r12 
 
     mov rsi, LAPIC_START_ADDR                       
     mov dword [rsi + 0xb0], 0                       ; 发送 EOI
@@ -323,20 +344,22 @@ new_task_notify_handler:
     swapgs
     jne .return 
 
-    call search_for_a_ready_task
+    call search_for_a_ready_thread
     or r11, r11 
     jz .return                                      ; 未找到就绪任务
 
     swapgs
-    add rsp, 16,                                    ; 去掉前面压入的两个
+    add rsp, 24,                                    ; 去掉前面压入的三个
     mov qword [gs:24], rsp                          ; 保存固有栈当前指针, 以便将来返回, 在进入中断时 RIP → CS → RFLAGS → RSP → SS 按顺序入栈
     swapgs
 
-    jmp resume_execute_a_task                       ; 执行新任务
+    jmp resume_execute_a_thread                     ; 执行新任务
 
 .return:
+    pop r12    
     pop r11
     pop rsi
+
     iretq 
 
 ; ------------------------------------------------------------
@@ -380,6 +403,22 @@ append_to_pcb_link:
     ret 
 
 ; ------------------------------------------------------------
+; get_current_tid
+; 功能: 返回当前线程的标识
+; 输出: rax=当前线程的标识
+; ------------------------------------------------------------
+get_current_tid:
+    pushfq
+    cli 
+    swapgs 
+    mov rax, [gs:32]
+    mov rax, [rax + 8]
+    swapgs
+    popfq
+
+    ret 
+
+; ------------------------------------------------------------
 ; get_current_pid
 ; 功能: 返回当前任务（进程）的标识
 ; 输出: rax=当前任务（进程）的标识
@@ -396,6 +435,31 @@ get_current_pid:
     ret 
 
 ; ------------------------------------------------------------
+; thread_exit
+; 功能: 线程终止退出
+; 输入: rdx=返回码
+; ------------------------------------------------------------
+thread_exit:
+    cli 
+
+    swapgs
+    mov rbx, [gs:32]                                ; 取出当前线程的 TCB 线性地址
+    mov rsp, [gs:24]                                ; 切换到处理器固有栈
+    swapgs
+
+    mov qword [rbx + 16], 2                         ; 线程状态: 终止
+    mov [rbx + 24], rdx                             ; 返回码
+
+    call search_for_a_ready_thread
+    or r11, r11 
+    jz .sleep 
+
+    jmp resume_execute_a_thread
+
+.sleep:
+    iretq                                           ; 回到不执行线程的代码
+
+; ------------------------------------------------------------
 ; terminate_process
 ; 功能: 终止当前任务
 ; ------------------------------------------------------------
@@ -406,20 +470,117 @@ terminate_process:
     cli                                             ; 执行流改变期间禁止时钟中断引发的任务切换
 
     swapgs
-    mov rax, [gs:8]                                 ; PCB 线性地址
+    mov rax, [gs:8]                                 ; 当前的 PCB 线性地址
     mov qword [rax + 16], 2                         ; 任务状态=终止
+    mov rax, [gs:32]                                ; 当前的 TCB 线性地址
+    mov qword [rax + 16], 2                         ; 线程状态=终止
     mov qword [gs:0], 0
     mov rsp, [gs:24]                                ; 切换到处理器固有栈
     swapgs
 
-    call search_for_a_ready_task
+    call search_for_a_ready_thread
     or r11, r11 
     jz .sleep                                       ; 未找到就绪任务
 
-    jmp resume_execute_a_task                       ; 执行新任务
+    jmp resume_execute_a_thread                     ; 执行新任务
 
 .sleep:
     iretq
+
+; ------------------------------------------------------------
+; create_thread
+; 功能: 创建一个线程
+; 输入: rsi=线程入口的线性地址, rdi=传递给线程的参数
+; 输出: rdx=线程标识
+; ------------------------------------------------------------
+create_thread:
+    push rax
+    push rbx
+    push rcx
+    push r11
+    push r12
+    push r13
+    push r14
+
+    ; 先创建并填写 TCB
+    mov rcx, 512                                    ; 开辟内核空间
+    call core_memory_allocate
+
+    mov rbx, r13                                    ; 以下, rbx专用于保存 TCB 线性地址
+
+    call generate_process_id
+    mov [rbx + 8], rax                              ; 记录当前线程的标识
+    mov rdx, rax                                    ; 用于返回线程标识
+
+    mov qword [rbx + 16], 0                         ; 线程状态=就绪
+
+    mov rcx, 4096 * 16                              ; 为 TSS 的 RSP0 开辟栈空间
+    call core_memory_allocate                       
+    mov [rbx + 32], r14                             ; 填写 TCB 中的 RSP0 域的值
+
+    pushfq
+    cli 
+    swapgs
+    mov r11, [gs:8]                                 ; 当前 PCB
+    mov r11, [gs:32]                                ; 当前 TCB
+    swapgs
+    popfq
+
+    ; 见书中 433 图
+    mov rcx, 4096 * 16                              ; 开辟线程栈空间
+    call user_memory_allocate
+    sub r14, 32                                     ; 栈中开辟 32 字节空间
+    mov [rbx + 120], r14                            ; 线程执行时的 rsp
+
+    lea rcx, [r14 + 8]                              ; 得到线程返回地址
+    mov [r14], rcx                                  ; 相当于 call 压入返回值
+
+    ; 以下填写指令 MOV RAX, 9 的机器代码
+    mov byte [rcx], 0xb8
+    mov byte [rcx + 1], 0x09
+    mov byte [rcx + 2], 0x00
+    mov byte [rcx + 3], 0x00
+    mov byte [rcx + 4], 0x00
+    ; 以下填写指令 XOR RDX, RDX 的机器代码
+    mov byte [rcx + 5], 0x48
+    mov byte [rcx + 6], 0x31
+    mov byte [rcx + 7], 0xd2
+    ; 以下填写指令 SYSCALL 的机器代码
+    mov byte [rcx + 8], 0x0f
+    mov byte [rcx + 9], 0x05
+
+    mov qword [rbx + 192], rsi                      ; 线程入口地址(rip)
+
+    mov qword [rbx + 200], USER_CODE64_SEL          ; 线程代码段选择子
+    mov qword [rbx + 208], USER_STACK64_SEL         ; 线程段选择子
+
+    pushfq
+    pop qword [rbx + 232]                           ; 线程执行时的标志寄存器
+
+    mov qword [rbx + 240], SUGG_PREEM_SLICE         ; 推荐的线程执行时间片
+    mov qword [rbx + 280], 0                        ; 下一个 TCB 的线性地址, 0=无
+
+.again:
+    xor rax, rax 
+    lock cmpxchg [r12 + 280], rbx                   ; 如果后继节点为 0, 则新节点为其后继. cmpxchg dest, src  ; 比较 dest 与 累加器(AL/AX/EAX/RAX)比较，相等则 dest ← src，否则累加器 ← dest
+    jz .linkd 
+    mov r12, [r12 + 280]
+    jmp .again
+
+.linkd:
+    mov rcx, LAPIC_START_ADDR
+    mov dword [rcx + 0x310], 0
+    mov dword [rcx + 0x300], 0x000840fe             ; 向所有处理器发送线程认领中断
+
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop rcx
+    pop rbx
+    pop rax
+
+    ret
 
 ; ------------------------------------------------------------
 ; create_process
@@ -449,6 +610,11 @@ create_process:
 
     mov r11, r13                                    ; r11 寄存器用来保存 PCB 线性地址
 
+    call core_memory_allocate                       ; 为线程控制块 TCB 分配内存
+    mov r12, r13                                    ; r13 寄存器用来保存 TCB 线性地址
+
+    mov qword [r11 + 272], r12                      ; 在 PCB 中登记第一个 TCB
+
     mov qword [r11 + 24], USER_ALLOC_START          ; 填写 PCB 的下一次内存分配时可用线性地址
     
     ; 从当前的四级头表复制并创建新任务的四级头表
@@ -474,14 +640,15 @@ create_process:
     ; 为新任务分配 0 特权级使用的栈空间
     mov rcx, 4096 * 16                              ; 在内核地址开辟空间
     call core_memory_allocate
-    mov [r11 + 32], r14                             ; 填入 PCB 中 RSP0, 满减栈, 所以写入结尾地址
+    mov [r12 + 32], r14                             ; 填入 TCB 中 RSP0, 满减栈, 所以写入结尾地址
 
     ; 为新任务分配 3 特权级使用的栈空间
     mov rcx, 4096 * 16                              ; 在用户地址开辟空间
     call user_memory_allocate
-    mov [r11 + 120], r14                            ; 填入 PCB 中 RSP
+    mov [r12 + 120], r14                            ; 填入 TCB 中 RSP
 
-    mov qword [r11 + 16], 0                         ; PCB 中的任务状态填为就绪    
+    mov qword [r11 + 16], 0                         ; PCB 中的任务状态填为运行
+    mov qword [r12 + 16], 0                         ; TCB 中的任务状态填为就绪
 
     ; 以下开始加载用户程序
     mov rcx, 512                                    ; 在用户空间开辟一个缓冲区
@@ -493,7 +660,7 @@ create_process:
     mov [r13 + 16], r13                             ; 在程序头填写它自己的起始线性地址
     mov r14, r13 
     add r14, [r13 + 8]
-    mov [r11 + 192], r14                            ; 在 PCB 中登记程序入口的线性地址
+    mov [r12 + 192], r14                            ; 在 TCB 中登记程序入口的线性地址
 
     ; 以下读取程序剩下代码
     mov rcx, [r13]                                  ; 程序尺寸(在程序头部记录)
@@ -514,16 +681,21 @@ create_process:
     loop .b1 
 
 .rdok:
-    mov qword [r11 + 200], USER_CODE64_SEL          ; 填写 PCB 中代码段选择子
-    mov qword [r11 + 208], USER_STACK64_SEL         ; 填写 PCB 中栈段选择子
+    mov qword [r12 + 200], USER_CODE64_SEL          ; 填写 TCB 中代码段选择子
+    mov qword [r12 + 208], USER_STACK64_SEL         ; 填写 TCB 中栈段选择子
 
     pushfq
-    pop qword [r11 + 232]                           ; 填写 PCB 中 RFLAGS
+    pop qword [r12 + 232]                           ; 填写 TCB 中 RFLAGS
 
-    mov qword [r11 + 240], SUGG_PREEM_SLICE         ; 推荐的执行时间片
+    mov qword [r12 + 240], SUGG_PREEM_SLICE         ; 推荐的执行时间片
 
     call generate_process_id
     mov [r11 + 8], rax                              ; 填入 PCB 中当前任务标识
+
+    call generate_thread_id
+    mov [r12 + 8], rax                              ; 记录主线程标识
+
+    mov qword [r12 + 280], 0                        ; 下一个 TCB 的线性地址初始化为 0
 
     call append_to_pcb_link                         ; 将 PCB 添加到进程控制链表尾部
 
@@ -531,7 +703,7 @@ create_process:
 
     mov rsi, LAPIC_START_ADDR                       ; Local APIC 的线性地址
     mov dword [rsi + 0x310], 0
-    mov dword [rsi + 0x300], 0x000840fe             ; 向所有处理器发送任务认领中断
+    mov dword [rsi + 0x300], 0x000840fe             ; 向所有处理器发送任务/线程认领中断
 
     pop r15
     pop r14
