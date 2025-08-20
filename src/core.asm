@@ -508,7 +508,7 @@ create_thread:
 
     mov rbx, r13                                    ; 以下, rbx专用于保存 TCB 线性地址
 
-    call generate_process_id
+    call generate_thread_id
     mov [rbx + 8], rax                              ; 记录当前线程的标识
     mov rdx, rax                                    ; 用于返回线程标识
 
@@ -522,7 +522,7 @@ create_thread:
     cli 
     swapgs
     mov r11, [gs:8]                                 ; 当前 PCB
-    mov r11, [gs:32]                                ; 当前 TCB
+    mov r12, [gs:32]                                ; 当前 TCB
     swapgs
     popfq
 

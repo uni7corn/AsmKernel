@@ -1703,7 +1703,7 @@
    508                                  
    509 00000EF5 4C89EB                      mov rbx, r13                                    ; 以下, rbx专用于保存 TCB 线性地址
    510                                  
-   511 00000EF8 E8F9F9FFFF                  call generate_process_id
+   511 00000EF8 E810FAFFFF                  call generate_thread_id
    512 00000EFD 48894308                    mov [rbx + 8], rax                              ; 记录当前线程的标识
    513 00000F01 4889C2                      mov rdx, rax                                    ; 用于返回线程标识
    514                                  
@@ -1717,7 +1717,7 @@
    522 00000F1B FA                          cli 
    523 00000F1C 0F01F8                      swapgs
    524 00000F1F 654C8B1C2508000000          mov r11, [gs:8]                                 ; 当前 PCB
-   525 00000F28 654C8B1C2520000000          mov r11, [gs:32]                                ; 当前 TCB
+   525 00000F28 654C8B242520000000          mov r12, [gs:32]                                ; 当前 TCB
    526 00000F31 0F01F8                      swapgs
    527 00000F34 9D                          popfq
    528                                  

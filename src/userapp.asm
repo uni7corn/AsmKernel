@@ -20,7 +20,7 @@ section app_code                                ; 应用程序代码段
 
 thread_procedure:
     mov rbp, rsp                                ; rbp 访问栈中数据，高级语言中的局部变量
-    sub rbp, 56                                 ; 呐, 这个就叫专业
+    sub rsp, 56                                 ; 呐, 这个就叫专业
 
     mov rax, 10                                 ; 分配内存
     mov rdx, 288                                ; 字节数
@@ -86,7 +86,7 @@ thread_procedure:
     call bin64_to_dec
     pop r8 
 
-    mov rbx, [rbp - 8]                          ; 清空缓冲区
+    mov rdi, [rbp - 8]                          ; 清空缓冲区
     mov byte [rdi], 0
 
     ; 链接字符串, 填入 app_msg 中
