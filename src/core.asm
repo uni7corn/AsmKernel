@@ -599,7 +599,7 @@ search_for_thread_id:
     cmp r11, 0
     jne .nextt
 
-    mov rbx, [rbx + 288]                            ; 下一个 PCB 节点
+    mov rbx, [rbx + 280]                            ; 下一个 PCB 节点
     cmp rbx, [rel pcb_ptr]                          ; 转一圈又回到 PCB 首节点?
     jne .nextp                                      ; 否。转 .nextp 处理下一个 PCB
 
@@ -635,7 +635,7 @@ waiting_for_a_thread:
 
     swapgs
     mov rax, qword [gs:8]                           ; 当前任务的 PCB 线性地址
-    mov rax, qword [gs:32]                          ; 当前线程的 TCB 线性地址
+    mov rbx, qword [gs:32]                          ; 当前线程的 TCB 线性地址
     swapgs
 
     ; 保存当前任务和线程的状态以便将来恢复执行。
