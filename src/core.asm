@@ -26,17 +26,23 @@ SECTION core_data                                   ; 内核数据段
 
     buffer      times 256 db 0
 
-    sys_entry   dq get_screen_row                   ; #0
-                dq get_cmos_time                    ; #1
-                dq put_cstringxy64                  ; #2
-                dq create_process                   ; #3
-                dq get_current_pid                  ; #4
-                dq terminate_process                ; #5
-                dq get_cpu_number                   ; #6
-                dq create_thread                    ; #7
-                dq get_current_tid                  ; #8
-                dq thread_exit                      ; #9
-                dq memory_allocate                  ; #10
+    sys_entry   dq get_screen_row                   ; #0  获取一个可用的屏幕行坐标
+                dq get_cmos_time                    ; #1  获取CMOS时间
+                dq put_cstringxy64                  ; #2  在指定坐标打印字符串
+                dq create_process                   ; #3  创建任务
+                dq get_current_pid                  ; #4  获取当前任务的标识
+                dq terminate_process                ; #5  终止当前任务
+                dq get_cpu_number                   ; #6  获取当前CPU的标识
+                dq create_thread                    ; #7  创建线程
+                dq get_current_tid                  ; #8  获取当前线程的标识
+                dq thread_exit                      ; #9  退出当前线程
+                dq memory_allocate                  ; #10 用户空间内存分配
+                dq waiting_for_a_thread             ; #11 等待指定的线程
+                dq init_mutex                       ; #12 初始化互斥锁
+                dq acquire_mutex                    ; #13 获取互斥锁
+                dq release_mutex                    ; #14 释放互斥锁
+                dq thread_sleep                     ; #15 线程休眠
+
     pcb_ptr     dq 0                                ; 进程控制块PCB首节点的线性地址
 
 
@@ -165,6 +171,146 @@ general_exception_handler:
     hlt                                             ; 停机且不接受外部硬件中断
 
 exceptm         db "A exception raised, halt.", 0   ; 发生异常时的错误信息
+
+; ------------------------------------------------------------
+; handle_waiting_thread
+; 功能: 处理等待其它线程的线程
+; 输入: r11=线程控制块 TCB 的线性地址
+; ------------------------------------------------------------
+handle_waiting_thread:
+    push rbx 
+    push rdx 
+    push r11 
+
+    mov rbx, r11 
+
+    mov rdx, [r11 + 56]                             ; 被等待的线程的标识
+    call search_for_thread_id
+    or r11, r11                                     ; 线程已经被清理了吗?
+    jz .set_th 
+    cmp qword [r11 + 16], 2                         ; 线程是终止状态吗?
+    jne .return                                     ; 不是。返回（继续等待）
+
+.set_th:
+    mov qword [rbx + 16], 0                         ; 将线程设置为就绪状态
+
+    mov r11, LAPIC_START_ADDR          
+    mov dword [r11 + 0x310], 0
+    mov dword [r11 + 0x300], 0x000840fe             ; 向所有处理器发送线程认领中断
+
+.return:
+    pop r11
+    pop rdx
+    pop rbx
+
+    ret
+
+; ------------------------------------------------------------
+; handle_waiting_sleep
+; 功能: 处理等待标志的线程
+; 输入: r11=线程控制块 TCB 的线性地址
+; ------------------------------------------------------------
+handle_waiting_flag:
+    push rax
+    push rbx
+    push rcx
+
+    mov rax, 0
+    mov rbx, [r11 + 56]                             ; 被等待的标志的线性地址
+    mov rcx, 1
+    lock cmpxchg [rbx], rcx 
+    jnz .return
+
+    mov qword [r11 + 16], 0                         ; 将线程设置为就绪状态
+
+    mov r11, LAPIC_START_ADDR          
+    mov dword [r11 + 0x310], 0
+    mov dword [r11 + 0x300], 0x000840fe             ; 向所有处理器发送线程认领中断
+
+.return:
+    pop rcx
+    pop rbx
+    pop rax
+
+    ret
+
+; ------------------------------------------------------------
+; handle_waiting_sleep
+; 功能: 处理睡眠中的线程
+; 输入: r11=线程控制块 TCB 的线性地址
+; ------------------------------------------------------------
+handle_waiting_sleep:
+    push rax 
+
+    dec qword [r11 + 56]                            ; 休眠时间数 - 1
+    cmp qword [r11 + 56], 0
+    jnz .return
+
+    mov qword [r11 + 16], 0                         ; 设置线程状态为就绪
+
+    mov rax, LAPIC_START_ADDR
+    mov qword [rax + 0x310], 0                      ; 向所有处理器发送线程认领中断
+    mov qword [rax + 0x300], 0x000840fe
+
+.return:
+    pop rax 
+
+    ret 
+
+; ------------------------------------------------------------
+; system_management_handler
+; 功能: 系统管理中断的处理过程
+; ------------------------------------------------------------
+system_management_handler:
+    push rbx 
+    push r11 
+
+    mov rbx, [rel pcb_ptr]                          ; pcb 链表首地址
+    or rbx, rbx 
+    jz .return                                      ; 不存在任务
+.nextp:
+    mov r11, [rbx + 272]
+    or r11, r11 
+    jz .return                                      ; 线程未创建
+.nextt:
+    cmp qword [r11 + 16], 3                         ; 正在休眠并等待其他线程?
+    jne .next0                                      ; 不是, 转去 .next0 处理此 TCB
+    call handle_waiting_thread                      ; 处理等待其它线程终止的线程并决定其是否唤醒
+    jmp .gnext 
+
+    ; switch-case
+.next0:
+    ; 处理等待某个信号的线程并决定其是否唤醒
+    cmp qword [r11 + 16], 5
+    jne .next1 
+    call handle_waiting_flag 
+    jmp .gnext
+.next1:
+    ; 处理休眠的线程并决定其是否唤醒
+    cmp qword [r11 + 16], 4
+    jne .next2
+    call handle_waiting_sleep
+    jmp .gnext
+.next2:
+.gnext:
+    mov r11, [r11 + 280]                            ; 下一个 TCB 节点
+    cmp r11, 0                                      ; 到达 TCB 链表尾部?
+    jne .nextt                                      ; 否, 继续遍历 TCB
+    mov rbx, [rbx + 280]                            ; 下一个 PCB 节点
+    cmp rbx, [rel pcb_ptr]                          ; 转一圈回到 PCB 首节点?
+    jne .nextp                                      ; 否, 处理下一个 PCB
+
+.return:
+    mov r11, LAPIC_START_ADDR                       ; 给 Local APIC 发送中断结束命令 EOI
+    mov dword [r11 + 0xb0], 0
+
+    mov rbx, UPPER_TEXT_VIDEO
+    not byte [rbx]
+
+    pop r11 
+    pop rbx 
+
+    iretq
 
 ; ------------------------------------------------------------
 ; search_for_a_ready_thread
@@ -435,16 +581,257 @@ get_current_pid:
     ret 
 
 ; ------------------------------------------------------------
+; search_for_thread_id
+; 功能: 查找指定标识的线程
+; 输入: rdx=线程标识
+; 输出: r11=线程的 TCB 线性地址, r11=0 表明不存在指定的线程
+; ------------------------------------------------------------
+search_for_thread_id:
+    push rbx 
+
+    mov rbx, [rel pcb_ptr]                          ; pcb 链表头
+.nextp:
+    mov r11, [rbx + 272]                            ; tcb
+.nextt:
+    cmp [r11 + 8], rdx                              ; 找到指定的线程了吗?
+    je .found                                       ; 是的。转.found
+    mov r11, [r11 + 280]                            ; 否。处理下一个 TCB 节点
+    cmp r11, 0
+    jne .nextt
+
+    mov rbx, [rbx + 288]                            ; 下一个 PCB 节点
+    cmp rbx, [rel pcb_ptr]                          ; 转一圈又回到 PCB 首节点?
+    jne .nextp                                      ; 否。转 .nextp 处理下一个 PCB
+
+    xor r11, r11                                    ; r11=0 表明不存在指定的线程
+.found:
+    pop rbx 
+
+    ret 
+
+; ------------------------------------------------------------
+; waiting_for_a_thread
+; 功能: 等待指定的线程结束
+; 输入: rdx=线程标识
+; ------------------------------------------------------------
+waiting_for_a_thread:
+    push rax
+    push rbx
+    push r11
+    push r12
+    push r13
+
+    call search_for_thread_id
+    or r11, r11                                     ; 线程存在
+    jz .return
+    cmp qword [r11 + 16], 2                         ; 线程已经终止?
+    je .return 
+
+    ; 被等待的线程还在运行，只能休眠并等待通知
+    cli 
+
+    mov rax, LAPIC_START_ADDR
+    mov dword [rax + 0x320], 0x00010000             ; 屏蔽定时器中断
+
+    swapgs
+    mov rax, qword [gs:8]                           ; 当前任务的 PCB 线性地址
+    mov rax, qword [gs:32]                          ; 当前线程的 TCB 线性地址
+    swapgs
+
+    ; 保存当前任务和线程的状态以便将来恢复执行。
+    mov r13, cr3                                    ; 保存原任务的分页系统
+    mov qword [rax + 56], r13
+    ; rax 和 rbx 不需要保存，将来恢复执行时从栈中弹出
+    mov [rbx + 80], rcx
+    mov [rbx + 88], rdx
+    mov [rbx + 96], rsi
+    mov [rbx + 104], rdi
+    mov [rbx + 112], rbp
+    mov [rbx + 120], rsp
+    mov [rbx + 128], r8
+    mov [rbx + 136], r9
+    mov [rbx + 144], r10
+    ; r11、r12 和 r13 不需要设置，将来恢复执行时从栈中弹出
+    mov [rbx + 176], r14
+    mov [rbx + 184], r15
+    mov r13, [rel position]
+    lea r13, [r13 + .return]                        ; 将来恢复执行时，是从例程调用返回
+    mov [rbx + 192], r13                            ; rip 域为中断返回点
+    mov [rbx + 200], cs
+    mov [rbx + 208], ss
+    pushfq
+    pop qword [rbx + 232]
+
+    mov qword [rbx + 16], 3                         ; 置线程状态为“休眠并等待指定线程结束”
+    mov qword [rbx + 56], rdx                       ; 设置被等待的线程标识
+
+    call search_for_a_ready_thread
+    or r11, r11 
+    jz .sleep
+
+    jmp resume_execute_a_thread
+
+.sleep:
+    swapgs
+    mov qword [gs:0], 0                             ; 当前处理器无有效 3 特权级栈指针
+    mov qword [gs:8], 0                             ; 当前处理器未在执行任务
+    mov qword [gs:32], 0                            ; 当前处理器未在执行线程
+    mov rsp, [gs:24]                                ; 切换到处理器的固有栈
+    swapgs
+
+    iretq
+
+.return:
+    pop r13
+    pop r12
+    pop r11
+    pop rbx
+    pop rax
+
+    ret
+
+; ------------------------------------------------------------
+; init_mutex
+; 功能: 初始化互斥锁
+; 输出: rdx=互斥锁变量线性地址
+; ------------------------------------------------------------
+init_mutex:
+    push rcx 
+    push r13 
+    push r14 
+
+    mov rcx, 8
+    call core_memory_allocate                       ; 必须是在内核的空间中开辟
+    mov qword [r13], 0                              ; 初始化互斥锁的状态（未加锁）
+    mov rdx, r13
+
+    pop r14
+    pop r13
+    pop rcx
+
+    ret
+
+; ------------------------------------------------------------
+; acquire_mutex
+; 功能: 获取互斥锁
+; 输入: rdx=互斥锁变量线性地址
+; ------------------------------------------------------------
+acquire_mutex:
+    ret 
+
+; ------------------------------------------------------------
+; release_mutex
+; 功能: 释放互斥锁
+; 输入: rdx=互斥锁变量线性地址
+; ------------------------------------------------------------
+release_mutex:
+    push rax 
+
+    xor rax, rax 
+    xchg [rdx], rax 
+    
+    pop rax 
+
+    ret 
+
+; ------------------------------------------------------------
+; thread_sleep
+; 功能: 线程休眠
+; 输入: rdx=以55ms为单位的时间长度
+; ------------------------------------------------------------
+thread_sleep:
+    push rax
+    push rbx
+    push r11
+    push r12
+    push r13
+
+    cmp rdx, 0
+    je .return 
+
+    ; 休眠就意味着阻塞当前进程
+    cli 
+
+    mov rax, LAPIC_START_ADDR
+    mov dword [rax + 0x320], 0x00010000             ; 屏蔽定时器中断
+
+    swapgs
+    mov rax, qword [gs:8]                           ; PCB 线性地址
+    mov rbx, qword [gs:32]                          ; TCB 线性地址
+    swapgs
+
+    ; 保存当前任务和线程的状态以便将来恢复执行。
+    mov r13, cr3                                    ; 保存原任务的分页系统
+    mov qword [rax + 56], r13
+    ; rax 和 rbx 不需要保存，将来恢复执行时从栈中弹出
+    mov [rbx + 80], rcx
+    mov [rbx + 88], rdx
+    mov [rbx + 96], rsi
+    mov [rbx + 104], rdi
+    mov [rbx + 112], rbp
+    mov [rbx + 120], rsp
+    mov [rbx + 128], r8
+    mov [rbx + 136], r9
+    mov [rbx + 144], r10
+    ; r11、r12 和 r13 不需要设置，将来恢复执行时从栈中弹出
+    mov [rbx + 176], r14
+    mov [rbx + 184], r15
+    mov r13, [rel position]
+    lea r13, [r13 + .return]                        ; 将来恢复执行时，重新尝试加锁
+    mov [rbx + 192], r13                            ; rip 域为中断返回点
+    mov [rbx + 200], cs
+    mov [rbx + 208], ss
+    pushfq
+    pop qword [rbx + 232]
+
+    mov qword [rbx + 56], rdx                       ; 设置以 55ms 为单位的时间长度
+    mov qword [rbx + 16], 4                         ; 置线程状态为“休眠指定时间长度”
+
+    call search_for_a_ready_thread
+    or r11, r11 
+    jz .sleep                                       ; 未找到就绪任务
+
+    jmp resume_execute_a_thread                     ; 恢复并执行新进程
+
+.sleep:
+    swapgs
+    mov qword [gs:0], 0                             ; 当前处理器无有效 3 级特权栈指针
+    mov qword [gs:8], 0                             ; 当前处理器未执行任务
+    mov qword [gs:32], 0                            ; 当前处理器未执行线程
+    mov rsp, [gs:24]                                ; 切换到处理器固有栈
+    swapgs
+
+    iretq
+
+.return:
+    mov rbx, UPPER_TEXT_VIDEO
+    not byte [rbx + 2]
+
+    pop r13
+    pop r12
+    pop r11
+    pop rbx
+    pop rax
+
+    ret
+
+; ------------------------------------------------------------
 ; thread_exit
 ; 功能: 线程终止退出
 ; 输入: rdx=返回码
 ; ------------------------------------------------------------
 thread_exit:
+    mov rsi, LAPIC_START_ADDR
+    mov dword [rsi + 0x320], 0x00010000             ; 屏蔽定时器中断
+
     cli 
 
     swapgs
     mov rbx, [gs:32]                                ; 取出当前线程的 TCB 线性地址
     mov rsp, [gs:24]                                ; 切换到处理器固有栈
+    mov qword [gs:0], 0                             ; 当前处理器无有效 3 级特权栈指针
+    mov qword [gs:8], 0                             ; 当前处理器未执行任务
+    mov qword [gs:32], 0                            ; 当前处理器未执行线程
     swapgs
 
     mov qword [rbx + 16], 2                         ; 线程状态: 终止
@@ -476,6 +863,9 @@ terminate_process:
     mov qword [rax + 16], 2                         ; 线程状态=终止
     mov qword [gs:0], 0
     mov rsp, [gs:24]                                ; 切换到处理器固有栈
+    mov qword [gs:0], 0                             ; 当前处理器无有效 3 级特权栈指针
+    mov qword [gs:8], 0                             ; 当前处理器未执行任务
+    mov qword [gs:32], 0                            ; 当前处理器未执行线程
     swapgs
 
     call search_for_a_ready_thread
@@ -1091,6 +1481,16 @@ init:
     call mount_idt_entry
     sti
 
+    ; 以下安装系统管理中断处理过程
+    mov r9, [rel position]
+    lea rax, [r9 + system_management_handler]
+    call make_interrupt_gate
+
+    cli 
+    mov r8, 0xfc 
+    call mount_idt_entry
+    sti 
+
     ; 以下初始化应用处理器 AP, 先将初始化代码复制到物理内存的选定位置
     mov rsi, [rel position]
     lea rsi, [rsi + section.ap_init_block.start]    ; 源
@@ -1126,6 +1526,13 @@ init:
 
     lea rbx, [r15 + cpu_init_ok]
     call put_string64
+
+    ; 系统管理中断的中断源
+    mov rdi, IOAPIC_START_ADDR
+    mov dword [rdi], 0x14                           ; 对应 8254 定时器。
+    mov dword [rdi + 0x10], 0x000000fc              ; 不屏蔽；物理模式；固定模式；向量 0xfc
+    mov dword [rdi], 0x15
+    mov dword [rdi + 0x10], 0x00000000              ; Local APIC ID：0
 
     ; 以下创建进程
     mov r8, 50

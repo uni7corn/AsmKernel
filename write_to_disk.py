@@ -50,7 +50,7 @@ def main():
         "ldr": 1,
         "core": 9,
         "shell": 50,
-        "userapp": 100
+        "userapp0": 100
     }
 
     # 调用写入函数

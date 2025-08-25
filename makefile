@@ -5,7 +5,7 @@ BINDIR = ./bin
 LSTDIR = ./lst
 
 # 默认目标
-all: mbr ldr core shell userapp
+all: mbr ldr core shell userapp userapp0
 
 # 编译规则
 mbr:
@@ -22,4 +22,7 @@ shell:
 
 userapp:
 	$(ASM) -f bin $(SRCDIR)/userapp.asm -o $(BINDIR)/userapp.bin -l $(LSTDIR)/userapp.lst
+
+userapp0:
+	$(ASM) -f bin $(SRCDIR)/userapp0.asm -o $(BINDIR)/userapp0.bin -l $(LSTDIR)/userapp0.lst
 

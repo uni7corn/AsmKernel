@@ -27,8 +27,8 @@ main:
     mov r8, 100                                     ; LBA 为 100 的位置
     mov rax, 3                                      ; 创建进程
     syscall
-    syscall
-    syscall
+    ; syscall
+    ; syscall
                           
     mov rax, 0                                      ; 可用行号, dh=行号
     syscall                 
@@ -75,9 +75,15 @@ _time:
     lea rsi, [r12 + time_buff]
     call string_concatenates
 
-    mov rbx, rdi 
     mov rax, 2                                      ; 打印字符串
+    mov rbx, rdi 
     syscall
+
+    push rdx                                        ; 保存当前屏幕坐标数据
+    mov rax, 15                                     ; 进入休眠
+    mov rdx, 10                                     ; 休眠时间 10 个 55ms
+    syscall
+    pop rdx 
 
     jmp _time
 
