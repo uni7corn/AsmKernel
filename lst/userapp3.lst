@@ -1,0 +1,300 @@
+     1                                  ; 演示数据竞争和互斥锁 
+     2                                  
+     3                                  section app_header                                      ; 应用程序头部
+     4 00000000 [3E03000000000000]          length      dq app_end                              ; #0：用户程序的总长度（字节数）
+     5 00000008 [3203000000000000]          entry       dq start                                ; #8：用户程序入口点
+     6 00000010 0000000000000000            linear      dq 0                                    ; #16：用户程序加载的虚拟（线性）地址
+     7                                  
+     8                                  section app_data                                        ; 应用程序数据段
+     9                                  
+    10 00000000 5468726561642000            tid_prex    db "Thread ", 0
+    11 00000008 2068617320636F6D70-         thrd_msg    db " has completed the calculation.", 0
+    11 00000011 6C6574656420746865-
+    11 0000001A 2063616C63756C6174-
+    11 00000023 696F6E2E00         
+    12 00000028 0000000000000000            share_d     dq 0
+    13 00000030 0000000000000000            mutex_ptr   dq 0                                   ; 互斥锁的指针（线性地址）
+    14                                  
+    15                                  section app_code                                        ; 应用程序代码段
+    16                                  
+    17                                  %include "./common/user_static64.asm"
+     1                              <1> ; 用户通用代码
+     2                              <1> 
+     3                              <1>     bits 64 
+     4                              <1> 
+     5                              <1> ; ------------------------------------------------------------
+     6                              <1> ; bin64_to_dec
+     7                              <1> ; 功能: 将二进制数转换为十进制字符串
+     8                              <1> ; 输入: r8=64位二进制数, rbx=目标缓冲区线性地址
+     9                              <1> ; ------------------------------------------------------------
+    10                              <1> bin64_to_dec: 
+    11 00000000 50                  <1>     push rax
+    12 00000001 53                  <1>     push rbx
+    13 00000002 51                  <1>     push rcx
+    14 00000003 52                  <1>     push rdx
+    15 00000004 4150                <1>     push r8
+    16                              <1> 
+    17 00000006 490FBAE03F          <1>     bt r8, 63                                       ; 检查最高位, 处理正,负数
+    18 0000000B 7309                <1>     jnc .begin
+    19 0000000D C6032D              <1>     mov byte [rbx], "-"
+    20 00000010 49F7D8              <1>     neg r8                                          ; 取反, 将负数转为正数
+    21                              <1> 
+    22 00000013 48FFC3              <1>     inc rbx
+    23                              <1> 
+    24                              <1> .begin:
+    25 00000016 4C89C0              <1>     mov rax, r8                                     ; rax 是被除数
+    26 00000019 41B80A000000        <1>     mov r8, 10
+    27 0000001F 4831C9              <1>     xor rcx, rcx                                    ; rcx 是位数
+    28                              <1> 
+    29                              <1> .next_div:
+    30 00000022 4831D2              <1>     xor rdx, rdx                                    ; 使用 128 位除法, 要将 rdx 清零
+    31 00000025 49F7F0              <1>     div r8 
+    32 00000028 52                  <1>     push rdx                                        ; 保存分解的数位
+    33 00000029 48FFC1              <1>     inc rcx 
+    34 0000002C 4809C0              <1>     or rax, rax                                     ; 商为 0?
+    35 0000002F 7402                <1>     jz .rotate
+    36 00000031 EBEF                <1>     jmp .next_div
+    37                              <1> 
+    38                              <1> .rotate:
+    39 00000033 5A                  <1>     pop rdx 
+    40 00000034 80C230              <1>     add dl, 0x30                                    ; 将数位转为 ASCII
+    41 00000037 8813                <1>     mov [rbx], dl 
+    42 00000039 48FFC3              <1>     inc rbx 
+    43 0000003C E2F5                <1>     loop .rotate
+    44                              <1> 
+    45 0000003E C60300              <1>     mov byte [rbx], 0
+    46                              <1> 
+    47 00000041 4158                <1>     pop r8
+    48 00000043 5A                  <1>     pop rdx
+    49 00000044 59                  <1>     pop rcx
+    50 00000045 5B                  <1>     pop rbx
+    51 00000046 58                  <1>     pop rax
+    52                              <1> 
+    53 00000047 C3                  <1>     ret 
+    54                              <1> 
+    55                              <1> ; ------------------------------------------------------------
+    56                              <1> ; string_concatenates
+    57                              <1> ; 功能: 将源字符串连接到目的字符串的尾部
+    58                              <1> ; 输入: rsi=源字符串的线性地址, rdi=目的字符串的线性地址
+    59                              <1> ; ------------------------------------------------------------
+    60                              <1> string_concatenates:
+    61 00000048 50                  <1>     push rax
+    62 00000049 56                  <1>     push rsi
+    63 0000004A 57                  <1>     push rdi
+    64                              <1> 
+    65                              <1>     
+    66                              <1> .r0:                                                ; 先找到 rdi 的结尾
+    67 0000004B 803F00              <1>     cmp byte [rdi], 0
+    68 0000004E 7405                <1>     jz .r1 
+    69 00000050 48FFC7              <1>     inc rdi 
+    70 00000053 EBF6                <1>     jmp .r0 
+    71                              <1>     
+    72                              <1> .r1:                                                ; 再复制源字符串过去
+    73 00000055 8A06                <1>     mov al, [rsi]
+    74 00000057 8807                <1>     mov [rdi], al 
+    75 00000059 3C00                <1>     cmp al, 0
+    76 0000005B 7408                <1>     jz .r2 
+    77 0000005D 48FFC6              <1>     inc rsi 
+    78 00000060 48FFC7              <1>     inc rdi 
+    79 00000063 EBF0                <1>     jmp .r1 
+    80                              <1>     
+    81                              <1> .r2:
+    82 00000065 5F                  <1>     pop rdi 
+    83 00000066 5E                  <1>     pop rsi 
+    84 00000067 58                  <1>     pop rax 
+    85                              <1> 
+    86 00000068 C3                  <1>     ret 
+    18                                  
+    19                                      [bits 64]
+    20                                  
+    21                                  thread_procedure1:
+    22 00000069 4889E5                      mov rbp, rsp                                        ; rbp 访问栈中数据, 高级语言中的局部变量
+    23 0000006C 4883EC20                    sub rsp, 32
+    24                                  
+    25 00000070 B80A000000                  mov rax, 10                                         ; 分配内存
+    26 00000075 BAA0000000                  mov rdx, 160                                        ; 160 个字节
+    27 0000007A 0F05                        syscall
+    28                                  
+    29 0000007C 4C896DF8                    mov [rbp - 8], r13                                  ; rbp-8->字符串缓冲区的线性地址
+    30                                  
+    31 00000080 4981C580000000              add r13, 128
+    32 00000087 4C896DF0                    mov [rbp - 16], r13                                 ; rbp-16->用来保存线程标识的文本
+    33                                  
+    34 0000008B B808000000                  mov rax, 8                                          ; 获得当前线程的标识
+    35 00000090 0F05                        syscall
+    36 00000092 4989C0                      mov r8, rax 
+    37 00000095 488B5DF0                    mov rbx, [rbp - 16]
+    38 00000099 E862FFFFFF                  call bin64_to_dec
+    39                                  
+    40 0000009E 488B15(30000000)            mov rdx, [rel mutex_ptr]                            ; 互斥锁的线性地址
+    41 000000A5 B80D000000                  mov rax, 13                                         ; 获取互斥锁
+    42 000000AA 0F05                        syscall
+    43                                  
+    44 000000AC B90065CD1D                  mov rcx, 500000000
+    45                                  
+    46                                  .plus_one: 
+    47 000000B1 48FF05(28000000)            inc qword [rel share_d]
+    48 000000B8 E2F7                        loop .plus_one
+    49                                  
+    50 000000BA B80E000000                  mov rax, 14                                         ; 释放互斥锁
+    51 000000BF 0F05                        syscall
+    52                                  
+    53 000000C1 4C8B25(10000000)            mov r12, [rel linear]
+    54                                  
+    55 000000C8 488B7DF8                    mov rdi, [rbp - 8]                                  ; 缓冲区清零
+    56 000000CC C60700                      mov byte [rdi], 0
+    57                                  
+    58 000000CF 498DB424[00000000]          lea rsi, [r12 + tid_prex]
+    59 000000D7 E86CFFFFFF                  call string_concatenates
+    60                                  
+    61 000000DC 488B75F0                    mov rsi, [rbp - 16]
+    62 000000E0 E863FFFFFF                  call string_concatenates
+    63                                  
+    64 000000E5 498DB424[08000000]          lea rsi, [r12 + thrd_msg]
+    65 000000ED E856FFFFFF                  call string_concatenates
+    66                                  
+    67 000000F2 B800000000                  mov rax, 0                                          ; 当前线程可以使用的显示行
+    68 000000F7 0F05                        syscall                                             ; 可用显示行, dh=行号
+    69                                  
+    70 000000F9 B200                        mov dl, 0                                           ; 列坐标
+    71 000000FB 41B10F                      mov r9b, 0x0f                                       ; 文本颜色
+    72                                  
+    73 000000FE B802000000                  mov rax, 2                                          ; 在指定坐标显示字符串
+    74 00000103 4889FB                      mov rbx, rdi 
+    75 00000106 0F05                        syscall
+    76                                  
+    77 00000108 4889EC                      mov rsp, rbp                                        ; 栈平衡到返回位置
+    78 0000010B C3                          ret 
+    79                                  
+    80                                  thread_procedure2:
+    81 0000010C 4889E5                      mov rbp, rsp                                        ; rbp 访问栈中数据, 高级语言中的局部变量
+    82 0000010F 4883EC20                    sub rsp, 32
+    83                                  
+    84 00000113 B80A000000                  mov rax, 10                                         ; 分配内存
+    85 00000118 BAA0000000                  mov rdx, 160                                        ; 160 个字节
+    86 0000011D 0F05                        syscall
+    87                                  
+    88 0000011F 4C896DF8                    mov [rbp - 8], r13                                  ; rbp-8->字符串缓冲区的线性地址
+    89                                  
+    90 00000123 4981C580000000              add r13, 128
+    91 0000012A 4C896DF0                    mov [rbp - 16], r13                                 ; rbp-16->用来保存线程标识的文本
+    92                                  
+    93 0000012E B808000000                  mov rax, 8                                          ; 获得当前线程的标识
+    94 00000133 0F05                        syscall
+    95 00000135 4989C0                      mov r8, rax 
+    96 00000138 488B5DF0                    mov rbx, [rbp - 16]
+    97 0000013C E8BFFEFFFF                  call bin64_to_dec
+    98                                  
+    99 00000141 488B15(30000000)            mov rdx, [rel mutex_ptr]                            ; 互斥锁的线性地址
+   100 00000148 B80D000000                  mov rax, 13                                         ; 获取互斥锁
+   101 0000014D 0F05                        syscall
+   102                                  
+   103 0000014F B90065CD1D                  mov rcx, 500000000
+   104                                  
+   105                                  .minus_one:
+   106 00000154 48FF0D(28000000)            dec qword [rel share_d]
+   107 0000015B E2F7                        loop .minus_one
+   108                                  
+   109 0000015D B80E000000                  mov rax, 14                                         ; 释放互斥锁
+   110 00000162 0F05                        syscall
+   111                                  
+   112 00000164 4C8B25(10000000)            mov r12, [rel linear]
+   113                                  
+   114 0000016B 488B7DF8                    mov rdi, [rbp - 8]                                  ; 缓冲区清零
+   115 0000016F C60700                      mov byte [rdi], 0
+   116                                  
+   117 00000172 498DB424[00000000]          lea rsi, [r12 + tid_prex]
+   118 0000017A E8C9FEFFFF                  call string_concatenates
+   119                                  
+   120 0000017F 488B75F0                    mov rsi, [rbp - 16]
+   121 00000183 E8C0FEFFFF                  call string_concatenates
+   122                                  
+   123 00000188 498DB424[08000000]          lea rsi, [r12 + thrd_msg]
+   124 00000190 E8B3FEFFFF                  call string_concatenates
+   125                                  
+   126 00000195 B800000000                  mov rax, 0                                          ; 当前线程可以使用的显示行
+   127 0000019A 0F05                        syscall                                             ; 可用显示行, dh=行号
+   128                                  
+   129 0000019C B200                        mov dl, 0                                           ; 列坐标
+   130 0000019E 41B10F                      mov r9b, 0x0f                                       ; 文本颜色
+   131                                  
+   132 000001A1 B802000000                  mov rax, 2                                          ; 在指定坐标显示字符串
+   133 000001A6 4889FB                      mov rbx, rdi 
+   134 000001A9 0F05                        syscall
+   135                                  
+   136 000001AB 4889EC                      mov rsp, rbp                                        ; 栈平衡到返回位置
+   137 000001AE C3                          ret 
+   138                                  
+   139                                  main:
+   140 000001AF B80C000000                  mov rax, 12                                         ; 初始化互斥锁变量
+   141 000001B4 0F05                        syscall 
+   142 000001B6 488915(30000000)            mov [rel mutex_ptr], rdx                            ; 保存互斥锁的线性地址
+   143                                  
+   144 000001BD 488B3D(10000000)            mov rdi, [rel linear]             
+   145                                  
+   146 000001C4 B807000000                  mov rax, 7                                          ; 创建线程
+   147                                  
+   148 000001C9 488DB7[69000000]            lea rsi, [rdi + thread_procedure1]                  ; 线程例程的线性地址
+   149 000001D0 0F05                        syscall 
+   150 000001D2 48891579000000              mov [rel .thrd_1], rdx                              ; 保存线程 1 的标识
+   151                                  
+   152 000001D9 488DB7[0C010000]            lea rsi, [rdi + thread_procedure2]                  ; 线程例程的线性地址
+   153 000001E0 0F05                        syscall 
+   154 000001E2 48891571000000              mov [rel .thrd_2], rdx                              ; 保存线程 2 的标识
+   155                                  
+   156 000001E9 B80B000000                  mov rax, 11
+   157 000001EE 488B155D000000              mov rdx, [rel .thrd_1]                              ; 等待线程 1 结束
+   158 000001F5 0F05                        syscall
+   159 000001F7 488B155C000000              mov rdx, [rel .thrd_2]                              ; 等待线程 2 结束
+   160 000001FE 0F05                        syscall
+   161                                  
+   162 00000200 4C8B25(10000000)            mov r12, [rel linear]
+   163                                  
+   164 00000207 498DBC24[B2020000]          lea rdi, [r12 + .main_buf]                          ; 字符串缓冲区清零
+   165 0000020F C60700                      mov byte [rdi], 0
+   166                                  
+   167 00000212 498DB424[62020000]          lea rsi, [r12 + .main_msg]
+   168 0000021A E829FEFFFF                  call string_concatenates
+   169                                  
+   170 0000021F 4C8B05(28000000)            mov r8, [rel share_d]                               ; 共享变量
+   171 00000226 498D9C24[92020000]          lea rbx, [r12 + .main_dat]
+   172 0000022E E8CDFDFFFF                  call bin64_to_dec
+   173                                  
+   174 00000233 4889DE                      mov rsi, rbx 
+   175 00000236 E80DFEFFFF                  call string_concatenates
+   176                                  
+   177 0000023B B800000000                  mov rax, 0                                          ; 当前线程可以使用的显示行
+   178 00000240 0F05                        syscall                                             ; 可用显示行, dh=行号
+   179                                  
+   180 00000242 B200                        mov dl, 0                                           ; 列坐标
+   181 00000244 41B10F                      mov r9b, 0x0f                                       ; 文本颜色
+   182                                  
+   183 00000247 B802000000                  mov rax, 2                                          ; 在指定坐标显示字符串
+   184 0000024C 4889FB                      mov rbx, rdi 
+   185 0000024F 0F05                        syscall
+   186                                  
+   187 00000251 C3                          ret 
+   188                                  
+   189 00000252 0000000000000000            .thrd_1     dq 0                                    ; 线程1的标识
+   190 0000025A 0000000000000000            .thrd_2     dq 0                                    ; 线程2的标识
+   191                                  
+   192 00000262 54686520726573756C-         .main_msg   db "The result after calculation by two threads is:", 0
+   192 0000026B 742061667465722063-
+   192 00000274 616C63756C6174696F-
+   192 0000027D 6E2062792074776F20-
+   192 00000286 746872656164732069-
+   192 0000028F 733A00             
+   193 00000292 00<rep 20h>                 .main_dat   times 32 db 0
+   194 000002B2 00<rep 80h>                 .main_buf   times 128 db 0
+   195                                  
+   196                                  start:
+   197                                      ; 初始化代码...
+   198                                  
+   199 00000332 E878FEFFFF                  call main
+   200                                  
+   201                                      ; 清理, 收尾代码
+   202                                  
+   203 00000337 B805000000                  mov rax, 5                                  ; 终止任务
+   204 0000033C 0F05                        syscall
+   205                                  
+   206                                  app_end:

@@ -717,7 +717,79 @@ init_mutex:
 ; 输入: rdx=互斥锁变量线性地址
 ; ------------------------------------------------------------
 acquire_mutex:
-    ret 
+    push rax
+    push rbx
+    push r11
+    push r12
+    push r13
+
+    mov r11, 1
+    mov rax, 0
+    lock cmpxchg [rdx], r11
+    jz .return
+
+    ; 未获得互斥锁，只能阻塞当前线程
+    cli 
+    
+    mov rax, LAPIC_START_ADDR
+    mov dword [rax + 0x320], 0x00010000             ; 屏蔽定时器中断
+
+    swapgs
+    mov rax, qword [gs:8]                           ; 当前任务的 PCB 线性地址
+    mov rbx, qword [gs:32]                          ; 当前线程的 TCB 线性地址
+    swapgs
+
+    ; 保存当前任务和线程的状态以便将来恢复执行。恢复时已获得互斥锁
+    mov r13, cr3                                    ; 保存原任务的分页系统
+    mov qword [rax + 56], r13
+    ; RAX 和 RBX 不需要保存，将来恢复执行时从栈中弹出
+    mov [rbx + 80], rcx
+    mov [rbx + 88], rdx
+    mov [rbx + 96], rsi
+    mov [rbx + 104], rdi
+    mov [rbx + 112], rbp
+    mov [rbx + 120], rsp
+    mov [rbx + 128], r8
+    mov [rbx + 136], r9
+    mov [rbx + 144], r10
+    ;r11、r12 和 r13 不需要设置，将来恢复执行时从栈中弹出
+    mov [rbx + 176], r14
+    mov [rbx + 184], r15
+    mov r13, [rel position]
+    lea r13, [r13 + .return]                        ; 将来恢复执行时已获得互斥锁
+    mov [rbx + 192], r13                            ; rip 域为中断返回点
+    mov [rbx + 200], cs
+    mov [rbx + 208], ss
+    pushfq
+    pop qword [rbx + 232]
+
+    mov qword [rbx + 56], rdx                       ; 设置被等待的数据的线性地址
+    mov qword [rbx + 16], 5                         ; 置线程状态为“休眠并等待某个信号清零”
+
+    call search_for_a_ready_thread
+    or r11, r11
+    jz .sleep                                       ; 未找到就绪的任务
+
+    jmp resume_execute_a_thread                     ; 恢复并执行新线程
+
+.sleep:
+    swapgs
+    mov qword [gs:0], 0                             ; 当前处理器无有效 3 特权级栈指针
+    mov qword [gs:8], 0                             ; 当前处理器未在执行任务
+    mov qword [gs:32], 0                            ; 当前处理器未在执行线程
+    mov rsp, [gs:24]                                ; 切换到处理器的固有栈
+    swapgs
+
+    iretq
+
+.return:
+    pop r13
+    pop r12
+    pop r11
+    pop rbx
+    pop rax
+
+    ret
 
 ; ------------------------------------------------------------
 ; release_mutex
@@ -1115,7 +1187,7 @@ create_process:
 ; ------------------------------------------------------------
 ; syscall_procedure
 ; 功能: 系统调用的处理过程, 处理器会自动关闭可屏蔽中断
-; 注意: rcx 和 r11 由处理器使用, 保存 rip 和 rflags 的内容; rbp 和 r15 由此例程占用. 如有必要, 请用户程序在调用 syscall 前保存它们, 在系统调用返回后自行恢复.
+; 注意: RCX 和 R11 由处理器使用，保存 RIP 和 RFLAGS 的内容. 进入时中断是禁止状态
 ; ------------------------------------------------------------
 syscall_procedure: 
 
@@ -1126,11 +1198,11 @@ syscall_procedure:
     swapgs
     sti                                             ; 准备工作全部完成，中断和任务切换无虞
 
-    push r15 
-    mov r15, [rel position]
-    add r15, [r15 + rax * 8 + sys_entry]            ; 得到指定的那个系统调用功能的线性地址
-    call r15
-    pop r15 
+    push rcx 
+    mov rcx, [rel position]
+    add rcx, [rcx + rax * 8 + sys_entry]            ; 得到指定的那个系统调用功能的线性地址
+    call rcx
+    pop rcx 
 
     cli 
     pop rsp                                         ; 恢复原先的 3 特权级栈指针
